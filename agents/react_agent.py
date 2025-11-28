@@ -9,8 +9,7 @@ from langchain_ollama import ChatOllama
 from langsmith import Client
 from tavily import TavilyClient
 
-from schemas import REACT_PROMPT_TEMPLATE
-from search_agent import AgentResponse
+from core.schemas import REACT_PROMPT_TEMPLATE, AgentResponse
 
 load_dotenv()
 
