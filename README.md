@@ -1,158 +1,180 @@
-# LangChain Tutorial
+# LangChain & LangGraph Tutorial
 
-A comprehensive tutorial project demonstrating LangChain patterns including agents, chains, and RAG (Retrieval Augmented Generation).
+A comprehensive tutorial project demonstrating modern LangChain and LangGraph patterns including agents, chains, RAG, and graph-based workflows.
 
 ## Project Structure
 
 ```
 LangChainTutorial/
-├── agents/                        # Agent implementations
-│   ├── react_agent.py             # ReAct agent with Tavily search
+├── agents/                        # Classic LangChain agents
+│   ├── react_agent.py             # ReAct agent with AgentExecutor
 │   ├── react_agent_2.py           # Alternative ReAct implementation
 │   ├── react_search_agent.py      # ReAct with LCEL output parsing
-│   └── search_agent.py            # Simple search agent with structured output
+│   └── search_agent.py            # Search agent with structured output
+│
+├── langgraph/                     # LangGraph agents (modern approach)
+│   ├── react_agent.py             # Prebuilt ReAct agent
+│   ├── custom_graph.py            # Custom graph-based workflow
+│   └── structured_output.py       # Agent with typed responses
+│
 ├── chains/                        # LCEL chain examples
-│   └── lcel_structured_example.py # Modern LCEL patterns with structured output
-├── core/                          # Shared utilities
-│   ├── schemas.py                 # Pydantic models and prompt templates
-│   └── tools.py                   # LangChain tools (Tavily search)
+│   └── lcel_structured_example.py # Modern LCEL patterns
+│
 ├── rag/                           # RAG implementation
-│   ├── ingestion.py               # Document loading and Pinecone indexing
-│   └── retrieval.py               # Query and retrieval chains
+│   ├── ingestion.py               # Document loading & indexing
+│   └── retrieval.py               # Query & retrieval chains
+│
+├── core/                          # Shared utilities
+│   ├── schemas.py                 # Pydantic models & prompts
+│   └── tools.py                   # LangChain tools
+│
 ├── docs/                          # Documentation
-│   ├── LCEL_EXPLANATION.md        # Deep dive into LCEL concepts
-│   └── QUICK_REFERENCE.md         # Quick lookup guide
-├── main.py                        # Basic LLM example with Ollama
-├── pyproject.toml                 # Project dependencies
-└── .env.example                   # Environment variables template
+│   ├── LCEL_EXPLANATION.md        # LCEL deep dive
+│   └── QUICK_REFERENCE.md         # Quick reference guide
+│
+├── main.py                        # Basic LLM example
+├── pyproject.toml                 # Dependencies
+└── .env.example                   # Environment template
 ```
+
+## LangChain vs LangGraph
+
+| Feature | LangChain (Classic) | LangGraph (Modern) |
+|---------|--------------------|--------------------|
+| **Architecture** | Sequential chains | Graph-based workflows |
+| **State** | Limited | Built-in state management |
+| **Control Flow** | Linear | Conditional branching, loops |
+| **Best For** | Simple pipelines | Complex agent workflows |
+| **Location** | `agents/` | `langgraph/` |
 
 ## Features
 
-### 1. Agents (agents/)
+### 1. LangGraph Agents (`langgraph/`)
 
-Different agent patterns using LangChain:
-
-- ReAct Pattern: Reasoning and acting agents that think step-by-step
-  - Search Agents: Web search using the Tavily API
-  - Structured Outputs: Pydantic models for type-safe responses
-
-Example: Running a ReAct agent
+Modern graph-based agents using LangGraph 0.3+:
 
 ```python
-from agents.react_agent import main
-main()
+from langgraph.prebuilt import create_react_agent
+
+agent = create_react_agent(
+    model=llm,
+    tools=[search_web],
+    response_format=ResponseSchema,  # Optional structured output
+)
+result = agent.invoke({"messages": [{"role": "user", "content": "query"}]})
 ```
 
-### 2. LCEL Chains (chains/)
+**Files:**
+- `react_agent.py` - Prebuilt ReAct agent with Tavily search
+- `custom_graph.py` - Custom graph with nodes, edges, and state
+- `structured_output.py` - Typed responses with Pydantic
 
-Modern LangChain Expression Language patterns:
+### 2. Classic LangChain Agents (`agents/`)
 
-- Build composable chains with the pipe operator `|`
-- Use `with_structured_output()` for guaranteed schema compliance
-- Support for parallel and sequential chain execution
-
-Example: LCEL chain with structured output
+Traditional AgentExecutor-based agents:
 
 ```python
-chain = prompt | llm.with_structured_output(ResponseSchema)
-result = chain.invoke({"query": "What is Bitcoin?"})
+from langchain_classic.agents import create_react_agent, AgentExecutor
+
+agent = create_react_agent(llm=llm, tools=tools, prompt=prompt)
+executor = AgentExecutor(agent=agent, tools=tools)
+result = executor.invoke({"input": "query"})
 ```
 
-### 3. RAG (rag/)
+### 3. LCEL Chains (`chains/`)
+
+LangChain Expression Language for composable pipelines:
+
+```python
+# Build chain with pipe operator
+chain = prompt | llm.with_structured_output(Schema) | parser
+
+# Execute
+result = chain.invoke({"query": "input"})
+```
+
+### 4. RAG Pipeline (`rag/`)
 
 Retrieval Augmented Generation with Pinecone:
 
-- Ingestion: Load documents, split into chunks, embed with Ollama, store in Pinecone
-- Retrieval: Query the vector store and generate answers with context
+- **Ingestion**: Load → Split → Embed → Store
+- **Retrieval**: Query → Retrieve → Generate
 
-### 4. Core Utilities (core/)
+### 5. Core Utilities (`core/`)
 
 Shared components:
-
-- Schemas: `AgentResponse`, `Source` Pydantic models
-- Tools: `search_tool` for Tavily web search
-- Prompts: `REACT_PROMPT_TEMPLATE` for ReAct agents
+- `schemas.py` - `AgentResponse`, `Source`, `REACT_PROMPT_TEMPLATE`
+- `tools.py` - `search_tool` for Tavily
 
 ## Prerequisites
 
-- Python 3.12+
-- Ollama (https://ollama.ai/) with models installed:
-  - `qwen3:30b-a3b` (or your preferred model)
-  - `qwen3-embedding:latest` (for RAG embeddings)
-- API Keys:
-  - Tavily API key (for web search)
-  - Pinecone API key (for RAG)
+- **Python 3.12+**
+- **[Ollama](https://ollama.ai/)** with models:
+  - `qwen3:30b-a3b` (or preferred model)
+  - `qwen3-embedding:latest` (for RAG)
+- **API Keys:**
+  - [Tavily](https://tavily.com/) - Web search
+  - [Pinecone](https://pinecone.io/) - Vector store
+  - [LangSmith](https://smith.langchain.com/) - Tracing (optional)
 
 ## Installation
 
-1. Clone the repository:
-
 ```bash
+# Clone
 git clone https://github.com/aimanyounises1/LangChainTutorial.git
 cd LangChainTutorial
-```
 
-2. Create and activate a virtual environment:
-
-```bash
+# Virtual environment
 python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-```
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
-3. Install dependencies:
-
-```bash
+# Install
 pip install -e .
 # Or with uv:
 uv sync
-```
 
-4. Set up environment variables:
-
-```bash
+# Environment
 cp .env.example .env
 # Edit .env with your API keys
 ```
 
 ## Environment Variables
 
-Create a `.env` file with:
-
 ```env
-# Tavily API (web search)
-TAVILY_API_KEY=your_tavily_api_key
+# Required
+TAVILY_API_KEY=your_tavily_key
+PINECONE_API_KEY=your_pinecone_key
+INDEX_NAME=langchain-rag
 
-# Pinecone (vector store for RAG)
-PINECONE_API_KEY=your_pinecone_api_key
-INDEX_NAME=your_index_name
-
-# Optional: LangSmith (tracing)
-LANGCHAIN_API_KEY=your_langsmith_api_key
+# Optional (tracing)
+LANGCHAIN_API_KEY=your_langsmith_key
 LANGCHAIN_TRACING_V2=true
+LANGCHAIN_PROJECT=LangChain Tutorial
 ```
 
 ## Usage
 
-### Basic LLM Example
+### LangGraph Agents (Recommended)
 
 ```bash
-python main.py
+# Prebuilt ReAct agent
+python -m langgraph.react_agent
+
+# Custom graph workflow
+python -m langgraph.custom_graph
+
+# Structured output agent
+python -m langgraph.structured_output
 ```
 
-### Run a ReAct Agent
+### Classic LangChain Agents
 
 ```bash
 python -m agents.react_agent
-```
-
-### Run Search Agent
-
-```bash
 python -m agents.search_agent
 ```
 
-### LCEL Structured Output Demo
+### LCEL Chains
 
 ```bash
 python -m chains.lcel_structured_example
@@ -161,68 +183,74 @@ python -m chains.lcel_structured_example
 ### RAG Pipeline
 
 ```bash
-# First, ingest documents
+# Ingest documents
 python -m rag.ingestion
 
-# Then query
+# Query
 python -m rag.retrieval
 ```
 
 ## Key Concepts
 
-### LCEL (LangChain Expression Language)
-
-Build chains declaratively using the pipe operator:
-
-```python
-# Build chain BEFORE execution
-chain = prompt | llm | output_parser
-
-# Execute the chain
-result = chain.invoke({"input": "query"})
-```
-
-Important: The pipe operator `|` works with Runnables, not executed data. See `docs/LCEL_EXPLANATION.md` for details.
-
 ### ReAct Pattern
 
-Agents that reason step-by-step:
+Reasoning and Acting loop:
+1. **Thought** - Analyze the problem
+2. **Action** - Choose and execute a tool
+3. **Observation** - Process tool result
+4. **Repeat** until final answer
 
-1. Thought: Analyze the question
-2. Action: Choose a tool to use
-3. Observation: See the tool result
-4. Repeat until final answer
+### LangGraph State Machine
+
+```
+START → agent → [tools → agent]* → END
+         ↓           ↑
+    (decide)    (loop back)
+```
+
+### LCEL Pipe Operator
+
+```python
+# Build BEFORE execution
+chain = step1 | step2 | step3
+
+# Then execute
+result = chain.invoke(input)
+```
 
 ### Structured Outputs
 
-Get type-safe responses using Pydantic:
-
 ```python
-class AgentResponse(BaseModel):
+class Response(BaseModel):
     answer: str
     sources: List[Source]
+    confidence: float
 
-llm_structured = llm.with_structured_output(AgentResponse)
+llm.with_structured_output(Response)
 ```
 
 ## Dependencies
 
-- `langchain` - Core LangChain framework
-- `langchain-ollama` - Ollama integration
-- `langchain-community` - Community integrations
-- `langchain-pinecone` - Pinecone vector store
-- `langchain-tavily` - Tavily search integration
-- `langchain-text-splitters` - Document chunking
-- `langchain-openai` - OpenAI integration (optional)
+```toml
+langchain >= 1.1.0
+langchain-community >= 0.4.1
+langchain-ollama >= 1.0.0
+langchain-pinecone >= 0.2.13
+langchain-tavily >= 0.2.13
+langgraph >= 0.3.0
+```
 
 ## Documentation
 
-- [LCEL Explanation](docs/LCEL_EXPLANATION.md) - Understanding LangChain Expression Language
-- [Quick Reference](docs/QUICK_REFERENCE.md) - Common patterns and fixes
+- [LCEL Explanation](docs/LCEL_EXPLANATION.md) - Understanding LCEL
+- [Quick Reference](docs/QUICK_REFERENCE.md) - Common patterns
 
-## Contributing
+## Resources
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+- [LangChain Docs](https://python.langchain.com/docs/tutorials/)
+- [LangGraph Docs](https://langchain-ai.github.io/langgraph/)
+- [LangGraph GitHub](https://github.com/langchain-ai/langgraph)
+- [LangChain Architecture](https://python.langchain.com/docs/concepts/architecture/)
 
 ## License
 
