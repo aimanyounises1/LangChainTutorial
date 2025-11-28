@@ -5,8 +5,8 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnableLambda
 from langchain_ollama import ChatOllama
 
-from schemas import AgentResponse, REACT_PROMPT_TEMPLATE
-from tools import search_tool
+from core.schemas import AgentResponse, REACT_PROMPT_TEMPLATE
+from core.tools import search_tool
 import dotenv
 load_dotenv(verbose=True)
 
