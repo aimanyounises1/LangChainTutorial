@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from pydantic import Field
 from tavily import TavilyClient
 from dotenv import load_dotenv
-from schemas import REACT_PROMPT_TEMPLATE
+from core.schemas import REACT_PROMPT_TEMPLATE
 import os
 api_key_check = os.getenv("TAVILY_API_KEY")
 print(api_key_check)
