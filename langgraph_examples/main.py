@@ -18,7 +18,7 @@ def should_continue(state: MessagesState) -> str:
 
 
 flow = StateGraph(MessagesState)
-flow.add_node(AGENT_REASON, run_agent_reasoning())
+flow.add_node(AGENT_REASON, run_agent_reasoning)
 flow.set_entry_point(AGENT_REASON)
 flow.add_node(ACT, tool_node)
 
@@ -33,5 +33,5 @@ app = flow.compile()
 app.get_graph().draw_mermaid_png(output_file_path='flow.png')
 if __name__ == '__main__':
     print("Hello ReAct langGraph with Function Calling")
-    res = app.invoke({"messages": [HumanMessage(content="What is the weather in Israel Arara Village")]})
-
+    res = app.invoke({"messages": [HumanMessage(content="What is the weather in Arara Haifa Isreal country?")]})
+    print(res)
