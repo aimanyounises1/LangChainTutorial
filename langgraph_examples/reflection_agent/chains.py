@@ -11,15 +11,16 @@ from langgraph_examples.reflection_agent.schemas import AnswerQuestion, ReviseAn
 load_dotenv(verbose=True)
 llm = ChatOllama(model='qwen3:30b-a3b',
                  validate_model_on_init=True,
-                 temperature=0.8,
-                 reasoning=True
+                 temperature=0,  # Temperature 0 for deterministic, focused responses
+                 reasoning=True,  # Enable thinking/reasoning mode
                  )
 
 parser = JsonOutputToolsParser(return_id=True)
 parser_pydantic = PydanticToolsParser(tools=[AnswerQuestion])
+parser_pydantic_reviser = PydanticToolsParser(tools=[ReviseAnswer])
 actor_prompt_template = ChatPromptTemplate.from_messages(
     [(
-        "system"
+        "system",
         """
         You're expert researcher.
         Current time: {time}
@@ -29,27 +30,29 @@ actor_prompt_template = ChatPromptTemplate.from_messages(
         """
 
     ),
-        MessagesPlaceholder(variable_name="messages")
+        MessagesPlaceholder(variable_name="messages"),
+        ("system", "Answer the user's question above using the required format."),
     ]
 ).partial(time=lambda: datetime.datetime.now().isoformat())
 
-revise_instructions = """Revise your previous answer using the new information.
-    - You should use the previous critique to add important information to your answer.
-        - You MUST include numerical citations in your revised answer to ensure it can be verified.
-        - Add a "References" section to the bottom of your answer (which does not count towards the word limit). In form of:
-            - [1] https://example.com
-            - [2] https://example.com
-    - You should use the previous critique to remove superfluous information from your answer and make SURE it is not more than 250 words.
+revise_instructions = """Revise your previous answer using the new information from the search results.
+
+    CRITICAL: Look at the FIRST message in the conversation - that is the user's original question.
+    You MUST answer ONLY that original question. Do NOT change topics or answer a different question.
+
+    Instructions:
+    - Use the search results to improve your answer about the ORIGINAL topic
+    - Include inline citations with the actual source URL next to the corresponding text, like: "Salicylic acid helps unclog pores [https://example.com/skincare]"
+    - The 'references' field MUST contain actual URLs (starting with http:// or https://), NOT citation names
+    - If your answer is complete and accurate, set search_queries to an empty list to stop the process
 """
 
-first_respond_prompt_template = actor_prompt_template.partial(first_instruction=" Provide a detailed"
-                                                                                " ~250 words answer")
+first_respond_prompt_template = actor_prompt_template.partial(first_instruction=" Provide a detailed and comprehensive answer")
 first_responder = first_respond_prompt_template | llm.bind_tools(tools=[AnswerQuestion],
                                                                  tool_choice="AnswerQuestion")
-reviser = (actor_prompt_template.partial(first_instruction=revise_instructions)
-           | llm.bind_tools(tools=[ReviseAnswer], tool_choice="ReviseAnswer"))
-
-
+reviser = actor_prompt_template.partial(
+    first_instruction=revise_instructions
+) | llm.bind_tools(tools=[ReviseAnswer], tool_choice="ReviseAnswer")
 
 if __name__ == '__main__':
     human_message = HumanMessage(
@@ -58,7 +61,9 @@ if __name__ == '__main__':
     chain = (first_respond_prompt_template
              | llm.bind_tools(tools=[AnswerQuestion],
                               tool_choice="AnswerQuestion")
-             | parser_pydantic)
+
+
+             )
 
     res = chain.invoke({"messages": [human_message]})
     print(res)
