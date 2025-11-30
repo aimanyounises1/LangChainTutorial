@@ -47,8 +47,10 @@ first_respond_prompt_template = actor_prompt_template.partial(first_instruction=
 first_responder = first_respond_prompt_template | llm.bind_tools(tools=[AnswerQuestion],
                                                                  tool_choice="AnswerQuestion")
 reviser = (actor_prompt_template.partial(first_instruction=revise_instructions)
-           | llm.bind_tools(tools=[ReviseAnswer], tool_choice="ReviseAnswer")
-           | parser_pydantic)
+           | llm.bind_tools(tools=[ReviseAnswer], tool_choice="ReviseAnswer"))
+
+
+
 if __name__ == '__main__':
     human_message = HumanMessage(
         content="Search and suggest for the skin care routine to prevent any breakouts on face and to clean out the acne on face")
