@@ -6,7 +6,7 @@ This module contains:
 - custom_graph: Custom graph-based agent workflows
 """
 
-from langgraph_examples.react import *
+from langgraph_examples import *
 
 
 __all__ = []
