@@ -9,11 +9,16 @@ from langchain_ollama import ChatOllama
 from langgraph_examples.reflection_agent.schemas import AnswerQuestion, ReviseAnswer
 
 load_dotenv(verbose=True)
-llm = ChatOllama(model='qwen3:30b-a3b',
-                 validate_model_on_init=True,
-                 temperature=0,  # Temperature 0 for deterministic, focused responses
-                 reasoning=True,  # Enable thinking/reasoning mode
-                 )
+
+# CRITICAL: num_ctx must be large enough to hold tool definitions + conversation
+# Without sufficient context, tool definitions get truncated causing text-based output
+llm = ChatOllama(
+    model='qwen3:30b-a3b',
+    validate_model_on_init=True,
+    temperature=0,      # Deterministic for reliable tool calling
+    reasoning=True,     # Enable thinking/reasoning mode
+    num_ctx=8192,       # Increased context window to prevent tool definition truncation
+)
 
 parser = JsonOutputToolsParser(return_id=True)
 parser_pydantic = PydanticToolsParser(tools=[AnswerQuestion])
@@ -47,7 +52,8 @@ revise_instructions = """Revise your previous answer using the new information f
     - If your answer is complete and accurate, set search_queries to an empty list to stop the process
 """
 
-first_respond_prompt_template = actor_prompt_template.partial(first_instruction=" Provide a detailed and comprehensive answer")
+first_respond_prompt_template = actor_prompt_template.partial(
+    first_instruction=" Provide a detailed and comprehensive answer")
 first_responder = first_respond_prompt_template | llm.bind_tools(tools=[AnswerQuestion],
                                                                  tool_choice="AnswerQuestion")
 reviser = actor_prompt_template.partial(
@@ -61,7 +67,6 @@ if __name__ == '__main__':
     chain = (first_respond_prompt_template
              | llm.bind_tools(tools=[AnswerQuestion],
                               tool_choice="AnswerQuestion")
-
 
              )
 
