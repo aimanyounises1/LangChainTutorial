@@ -1,0 +1,10 @@
+{
+  "$schema": "https://langchain-ai.github.io/langgraph/schemas/langgraph.json",
+  "graphs": {
+    "deep_research_agent": {
+      "path": "./graph.py:deep_research_graph",
+      "description": "A comprehensive multi-agent system for conducting deep research on any topic"
+    }
+  },
+  "env": ".env"
+}

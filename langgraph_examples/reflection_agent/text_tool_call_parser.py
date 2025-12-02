@@ -1,4 +1,16 @@
 """
+DEPRECATED: This module is no longer needed in the main flow.
+
+The reflection agent now uses `with_structured_output()` which returns
+Pydantic objects directly, eliminating the need for text-based tool call parsing.
+
+This file is kept for:
+1. Backward compatibility with any code that imports from it
+2. Reference for handling edge cases with models that don't support structured output
+3. Potential fallback mechanism if needed
+
+---
+Original purpose:
 Text-Based Tool Call Parser for LangGraph
 
 This module handles the case where LLMs (especially Ollama models) output tool calls

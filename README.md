@@ -22,11 +22,25 @@ LangChainTutorial/
 │   ├── chain.py                         # Prompt chains for reflection
 │   ├── reflection.py                    # Basic reflection graph (generate → reflect)
 │   │
-│   └── reflection_agent/                # Advanced Reflexion Agent
-│       ├── main.py                      # Graph: draft → execute_tools → revise
-│       ├── schemas.py                   # AnswerQuestion, ReviseAnswer, Reflection
-│       ├── chains.py                    # Actor/Reviser prompt chains
-│       └── tools_executor.py            # Tavily search tool execution
+│   ├── reflection_agent/                # Advanced Reflexion Agent
+│   │   ├── main.py                      # Graph: draft → execute_tools → revise
+│   │   ├── schemas.py                   # AnswerQuestion, ReviseAnswer, Reflection
+│   │   ├── chains.py                    # with_structured_output() chains
+│   │   ├── tools_executor.py            # Tavily search tool execution
+│   │   └── text_tool_call_parser.py     # Fallback parser for text-based tool calls
+│   │
+│   └── deep_research_agent/             # Multi-Agent Deep Research System
+│       ├── graph.py                     # Main StateGraph orchestration
+│       ├── schemas.py                   # ResearchPlan, DeepResearchState, etc.
+│       ├── main.py                      # Entry point for standalone execution
+│       ├── text_parser.py               # Text-based tool call parsing
+│       ├── langgraph.json               # LangGraph Studio configuration
+│       └── agents/                      # Specialized sub-agents
+│           ├── planner.py               # Research plan with sub-questions
+│           ├── researcher.py            # Tavily search execution
+│           ├── synthesizer.py           # Findings → draft integration
+│           ├── critic.py                # Quality evaluation
+│           └── report_generator.py      # Final report formatting
 │
 ├── chains/                              # LCEL chain examples
 │   └── lcel_structured_example.py       # Modern LCEL patterns
@@ -101,15 +115,87 @@ Advanced self-improving agent that uses reflection to iteratively enhance respon
 1. **Draft** - First responder generates initial answer with reflection
 2. **Execute Tools** - Runs Tavily search queries to gather information
 3. **Revise** - Improves answer based on search results and self-critique
-4. **Loop** - Repeats until max iterations reached
+4. **Loop** - Repeats until max iterations or empty search_queries
+
+**Key Features:**
+- Uses `with_structured_output()` for direct Pydantic returns
+- Built-in retry with `.with_retry()` for resilience
+- SQLite checkpointing for state persistence
+- RetryPolicy on nodes for transient error handling
 
 **Files:**
-- `main.py` - Graph orchestration with MessageGraph
+- `main.py` - StateGraph orchestration with SQLite checkpointer
 - `schemas.py` - `AnswerQuestion`, `ReviseAnswer`, `Reflection` models
-- `chains.py` - Actor and Reviser prompt templates
+- `chains.py` - Structured output chains with automatic retry
 - `tools_executor.py` - Tavily search execution
+- `text_tool_call_parser.py` - Fallback parser for text-based tool calls
 
-### 3. Classic LangChain Agents (`agents/`)
+### 3. Deep Research Agent (`langgraph_examples/deep_research_agent/`)
+
+Multi-agent system for comprehensive research with iterative refinement:
+
+```
+┌─────────────┐
+│   START     │
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐     Creates ResearchPlan with sub-questions
+│   Planner   │────────────────────────────────────────────►
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐     Executes Tavily searches for each sub-question
+│ Researcher  │────────────────────────────────────────────►
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐     Integrates findings into draft sections
+│ Synthesizer │────────────────────────────────────────────►
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐     Evaluates quality, identifies gaps
+│   Critic    │────────────────────────────────────────────►
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│ Continue?   │──── YES ──► Back to Researcher
+│             │
+│             │──── NO  ──► Report Generator ──► END
+└─────────────┘
+```
+
+**Research Phases:**
+1. **PLANNING** - Analyze query, create sub-questions, define methodology
+2. **RESEARCHING** - Execute targeted searches for each sub-question
+3. **SYNTHESIZING** - Integrate findings with proper citations
+4. **CRITIQUING** - Evaluate coverage, depth, and completeness
+5. **FINALIZING** - Generate polished report with references
+
+**Quality Metrics:**
+- Coverage Score (sub-questions addressed)
+- Depth Score (analysis quality)
+- Citation Density (sources per section)
+- Completeness Score (overall quality)
+
+**Files:**
+- `graph.py` - Main StateGraph with phase transitions
+- `schemas.py` - `DeepResearchState`, `ResearchPlan`, `SubQuestion`, etc.
+- `agents/planner.py` - Research plan generation
+- `agents/researcher.py` - Tavily search with batch execution
+- `agents/synthesizer.py` - Draft section creation
+- `agents/critic.py` - Quality evaluation and gap identification
+- `agents/report_generator.py` - Final report formatting
+
+**LangGraph Studio:**
+Compatible with LangGraph Studio for visual debugging. Run with:
+```bash
+langgraph dev --config langgraph_examples/deep_research_agent/langgraph.json
+```
+
+### 4. Classic LangChain Agents (`agents/`)
 
 Traditional AgentExecutor-based agents:
 
@@ -121,7 +207,7 @@ executor = AgentExecutor(agent=agent, tools=tools)
 result = executor.invoke({"input": "query"})
 ```
 
-### 4. LCEL Chains (`chains/`)
+### 5. LCEL Chains (`chains/`)
 
 LangChain Expression Language for composable pipelines:
 
@@ -133,7 +219,7 @@ chain = prompt | llm.with_structured_output(Schema) | parser
 result = chain.invoke({"query": "input"})
 ```
 
-### 5. RAG Pipeline (`rag/`)
+### 6. RAG Pipeline (`rag/`)
 
 Retrieval Augmented Generation with Pinecone:
 
@@ -145,7 +231,7 @@ Retrieval Augmented Generation with Pinecone:
   - Async batch processing for performance
 - **Retrieval** (`retrieval.py`): Query → Retrieve → Generate
 
-### 6. Core Utilities (`core/`)
+### 7. Core Utilities (`core/`)
 
 Shared components:
 - `schemas.py` - `AgentResponse`, `Source`, `REACT_PROMPT_TEMPLATE`
@@ -216,6 +302,12 @@ python -m langgraph_examples.reflection
 
 # Advanced Reflexion agent
 python -m langgraph_examples.reflection_agent.main
+
+# Deep Research Agent (standalone)
+python -m langgraph_examples.deep_research_agent.main
+
+# Deep Research Agent (LangGraph Studio)
+langgraph dev --config langgraph_examples/deep_research_agent/langgraph.json
 ```
 
 ### Classic LangChain Agents
@@ -261,6 +353,16 @@ Self-improving agent loop:
 2. **Search** - Research to address identified gaps
 3. **Revise** - Improve answer with citations
 4. **Repeat** until quality threshold met
+
+### Deep Research Pattern
+
+Multi-agent research system:
+1. **Plan** - Decompose query into sub-questions with MECE principle
+2. **Research** - Execute targeted searches per sub-question
+3. **Synthesize** - Integrate findings into structured draft
+4. **Critique** - Evaluate quality metrics and identify gaps
+5. **Iterate** - Loop back to research if below threshold
+6. **Finalize** - Generate polished report with citations
 
 ### LangGraph State Machine
 

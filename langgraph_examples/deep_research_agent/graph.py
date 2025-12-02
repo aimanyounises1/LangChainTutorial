@@ -1,42 +1,18 @@
-"""
-Deep Research Agent - Main Orchestration Graph
-
-This module implements the main LangGraph state machine that orchestrates
-all sub-agents to perform comprehensive deep research.
-
-The graph flow:
-1. PLAN: Analyze query and create research plan
-2. RESEARCH: For each sub-question, gather information
-3. SYNTHESIZE: Integrate findings into evolving draft
-4. CRITIQUE: Evaluate quality and determine next action
-5. Loop back to RESEARCH or proceed to FINALIZE
-6. FINALIZE: Generate polished final report
-
-State is persisted to SQLite for debugging and recovery.
-"""
-
 import datetime
 import json
-from pathlib import Path
-from typing import TypedDict, Annotated, List, Optional, Dict, Any
 import operator
+import sqlite3
+from pathlib import Path
+from typing import TypedDict, Annotated, List, Dict, Any
 
+# Load environment variables BEFORE any langchain imports to enable LangSmith tracing!
 from dotenv import load_dotenv
+load_dotenv(verbose=True)
+
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import StateGraph, END
-
-from langgraph_examples.deep_research_agent.schemas import (
-    ResearchPhase,
-    ResearchPlan,
-    ResearchDraft,
-    Citation,
-    SubQuestion,
-    CritiqueResult,
-    QualityMetrics,
-    StopConditionConfig,
-    DraftSection,
-)
 
 from langgraph_examples.deep_research_agent.agents import (
     # Planner
@@ -52,18 +28,23 @@ from langgraph_examples.deep_research_agent.agents import (
     initialize_draft,
     # Critic
     critique_draft,
-    should_stop,
     # Report Generator
     generate_final_report,
     format_report_as_markdown,
     calculate_report_statistics,
 )
-
+from langgraph_examples.deep_research_agent.schemas import (
+    ResearchPhase,
+    ResearchPlan,
+    ResearchDraft,
+    Citation,
+    CritiqueResult,
+    QualityMetrics,
+    StopConditionConfig,
+)
 from langgraph_examples.deep_research_agent.text_parser import (
     parse_text_tool_calls,
 )
-
-load_dotenv(verbose=True)
 
 # ============================================================================
 # CONFIGURATION
@@ -72,6 +53,10 @@ load_dotenv(verbose=True)
 CHECKPOINTS_DIR = Path(__file__).parent / "checkpoints"
 CHECKPOINTS_DIR.mkdir(exist_ok=True)
 CHECKPOINT_DB = str(CHECKPOINTS_DIR / "deep_research_state.db")
+# Use direct sqlite3 connection for persistent file-based storage
+# (from_conn_string returns a context manager, not a direct instance)
+_checkpoint_conn = sqlite3.connect(CHECKPOINT_DB, check_same_thread=False)
+checkpointer = SqliteSaver(_checkpoint_conn)
 
 DEFAULT_STOP_CONFIG = StopConditionConfig(
     min_coverage_score=0.7,
@@ -88,48 +73,49 @@ DEFAULT_STOP_CONFIG = StopConditionConfig(
 # STATE DEFINITION
 # ============================================================================
 
-class DeepResearchGraphState(TypedDict):
-    """State for the deep research graph using TypedDict for LangGraph compatibility."""
+class DeepResearchGraphState(TypedDict, total=False):
+    """
+    State for the deep research graph using TypedDict for LangGraph compatibility.
+
+    Using total=False makes all fields optional at the TypedDict level,
+    which aligns with LangGraph's pattern of partial state updates.
+    """
     # Input
     original_query: str
-    
-    # Research plan
-    research_plan: Optional[Dict[str, Any]]  # Serialized ResearchPlan
-    
-    # Draft evolution
-    draft: Optional[Dict[str, Any]]  # Serialized ResearchDraft
-    
-    # Citations collection
-    citations: Annotated[List[Dict[str, Any]], operator.add]  # List of serialized Citations
-    
+
+    # Research plan (serialized ResearchPlan)
+    research_plan: Dict[str, Any]
+
+    # Draft evolution (serialized ResearchDraft)
+    draft: Dict[str, Any]
+
+    # Citations collection (list of serialized Citations, uses reducer)
+    citations: Annotated[List[Dict[str, Any]], operator.add]
+
     # Progress tracking
     phase: str
     current_sub_question_index: int
     iteration: int
     max_iterations: int
-    
-    # Quality tracking
-    critique_history: Annotated[List[Dict[str, Any]], operator.add]  # List of serialized CritiqueResult
-    latest_critique: Optional[Dict[str, Any]]
-    
+
+    # Quality tracking (critique_history uses reducer)
+    critique_history: Annotated[List[Dict[str, Any]], operator.add]
+    latest_critique: Dict[str, Any]
+
     # Search results (for current iteration)
     current_search_results: str
-    
+
     # Completion
     is_complete: bool
-    completion_reason: Optional[str]
-    
+    completion_reason: str
+
     # Final output
-    final_report: Optional[str]
-    report_metadata: Optional[Dict[str, Any]]
-    
-    # Messages (for debugging/logging)
+    final_report: str
+    report_metadata: Dict[str, Any]
+
+    # Messages (for debugging/logging, uses reducer)
     messages: Annotated[List[BaseMessage], operator.add]
 
-
-# ============================================================================
-# SERIALIZATION HELPERS
-# ============================================================================
 
 def serialize_plan(plan: ResearchPlan) -> Dict[str, Any]:
     """Serialize ResearchPlan to dict."""
@@ -171,22 +157,7 @@ def deserialize_critique(data: Dict[str, Any]) -> CritiqueResult:
     return CritiqueResult(**data)
 
 
-# ============================================================================
-# HELPER: Extract query from state
-# ============================================================================
-
 def extract_query_from_state(state: DeepResearchGraphState) -> str:
-    """
-    Extract the research query from state.
-
-    Handles multiple input formats:
-    1. Direct: state["original_query"] is set (when running via code)
-    2. LangGraph Studio: query comes via state["messages"] (HumanMessage)
-    3. Multi-modal format: content is a list of blocks [{'type': 'text', 'text': '...'}]
-
-    Returns:
-        The query string
-    """
     def extract_text_from_content(content) -> str:
         """Extract text from various content formats."""
         if isinstance(content, str):
@@ -233,86 +204,85 @@ def extract_query_from_state(state: DeepResearchGraphState) -> str:
 # NODE FUNCTIONS
 # ============================================================================
 
-def planning_node(state: DeepResearchGraphState) -> dict:
+def planning_node(state: DeepResearchGraphState) -> Dict[str, Any]:
     """
     Planning node - Creates the research plan from the original query.
     
     Handles input from both direct invocation and LangGraph Studio.
     """
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("[PLANNER] Creating research plan...")
-    print(f"{'='*60}")
-    
+    print(f"{'=' * 60}")
+
     # Extract query from state (handles both input formats)
     query = extract_query_from_state(state)
     print(f"[PLANNER] Query: {query[:100]}...")
-    
+
     # Store original_query in state for downstream nodes
     updates = {"original_query": query}
-    
+
     try:
         # Invoke planner chain
         result = planner_chain.invoke({
             "messages": [HumanMessage(content=query)]
         })
-        
+
         # Parse text-based tool calls if needed
         if not result.tool_calls:
             result = parse_text_tool_calls(result)
-        
+
         if result.tool_calls:
             parsed = planner_parser.invoke(result)
             if parsed:
                 plan = parsed.research_plan
                 is_valid, issues = validate_research_plan(plan)
-                
+
                 if is_valid:
                     print(f"[PLANNER] Created plan with {len(plan.sub_questions)} sub-questions")
                     for sq in plan.sub_questions:
                         print(f"  [{sq.priority}] {sq.question}")
-                    
+
                     return {
                         "original_query": query,  # Store for downstream nodes
                         "research_plan": serialize_plan(plan),
                         "phase": ResearchPhase.RESEARCHING.value,
                         "current_sub_question_index": 0,
-                        "messages": [AIMessage(content=f"Created research plan with {len(plan.sub_questions)} sub-questions")]
+                        "messages": [
+                            AIMessage(content=f"Created research plan with {len(plan.sub_questions)} sub-questions")]
                     }
                 else:
                     print(f"[PLANNER] Plan validation failed: {issues}")
     except Exception as e:
         print(f"[PLANNER] Error: {e}")
-    
+
     # Fallback to default plan
     print("[PLANNER] Using fallback plan")
     default_plan = create_default_plan(query)
-    
+
     return {
         "original_query": query,  # Store for downstream nodes
         "research_plan": serialize_plan(default_plan),
         "phase": ResearchPhase.RESEARCHING.value,
         "current_sub_question_index": 0,
-        "messages": [AIMessage(content=f"Created fallback research plan with {len(default_plan.sub_questions)} sub-questions")]
+        "messages": [
+            AIMessage(content=f"Created fallback research plan with {len(default_plan.sub_questions)} sub-questions")]
     }
 
 
-def research_node(state: DeepResearchGraphState) -> dict:
+def research_node(state: DeepResearchGraphState) -> Dict[str, Any]:
     """
     Research node - Researches the current sub-question.
     """
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("[RESEARCHER] Gathering information...")
-    print(f"{'='*60}")
-    
+    print(f"{'=' * 60}")
+
     plan_data = state["research_plan"]
     plan = deserialize_plan(plan_data)
-    
-    current_idx = state["current_sub_question_index"]
-    
-    # Find next pending sub-question
-    pending_questions = [(i, sq) for i, sq in enumerate(plan.sub_questions) 
+
+    pending_questions = [(i, sq) for i, sq in enumerate(plan.sub_questions)
                          if sq.status in ("pending", "in_progress")]
-    
+
     if not pending_questions:
         print("[RESEARCHER] No pending sub-questions")
         return {
@@ -320,23 +290,23 @@ def research_node(state: DeepResearchGraphState) -> dict:
             "current_search_results": "",
             "messages": [AIMessage(content="No more sub-questions to research")]
         }
-    
+
     # Get current sub-question
     idx, sub_question = pending_questions[0]
     sub_question.status = "in_progress"
-    
+
     print(f"[RESEARCHER] Researching: {sub_question.question}")
-    
+
     # Get existing citations count
     existing_citations = len(state.get("citations", []))
-    
+
     # Get previous findings for context
     draft_data = state.get("draft")
     previous_findings = ""
     if draft_data:
         draft = deserialize_draft(draft_data)
         previous_findings = "\n".join(s.content[:500] for s in draft.sections)
-    
+
     # Execute research
     content, new_citations, queries_used = research_sub_question(
         sub_question=sub_question,
@@ -344,18 +314,18 @@ def research_node(state: DeepResearchGraphState) -> dict:
         previous_findings=previous_findings,
         existing_citations=existing_citations
     )
-    
+
     # Update sub-question with queries used
     sub_question.search_queries = queries_used
-    
+
     # Serialize new citations
     serialized_citations = [serialize_citation(c) for c in new_citations]
-    
+
     print(f"[RESEARCHER] Found {len(new_citations)} new sources")
-    
+
     # Update plan with sub-question status
     plan.sub_questions[idx] = sub_question
-    
+
     return {
         "research_plan": serialize_plan(plan),
         "current_sub_question_index": idx,
@@ -366,38 +336,38 @@ def research_node(state: DeepResearchGraphState) -> dict:
     }
 
 
-def synthesize_node(state: DeepResearchGraphState) -> dict:
+def synthesize_node(state: DeepResearchGraphState) -> Dict[str, Any]:
     """
     Synthesize node - Integrates findings into the draft.
     """
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("[SYNTHESIZER] Integrating findings...")
-    print(f"{'='*60}")
-    
+    print(f"{'=' * 60}")
+
     plan_data = state["research_plan"]
     plan = deserialize_plan(plan_data)
-    
+
     # Get current sub-question
     idx = state["current_sub_question_index"]
     sub_question = plan.sub_questions[idx]
-    
+
     # Get current draft
     draft_data = state.get("draft")
     current_draft = deserialize_draft(draft_data) if draft_data else None
-    
+
     # Get all citations
     all_citations = [deserialize_citation(c) for c in state.get("citations", [])]
-    
+
     # Get search results
     search_results = state.get("current_search_results", "")
-    
+
     if not search_results:
         print("[SYNTHESIZER] No search results to synthesize")
         return {
             "phase": ResearchPhase.CRITIQUING.value,
             "messages": [AIMessage(content="No search results to synthesize")]
         }
-    
+
     # Synthesize findings
     updated_section, new_citations, notes = synthesize_findings(
         sub_question=sub_question,
@@ -407,25 +377,25 @@ def synthesize_node(state: DeepResearchGraphState) -> dict:
         available_citations=all_citations,
         expected_sections=plan.expected_sections
     )
-    
+
     # Update draft
     if current_draft is None:
         current_draft = initialize_draft(plan.main_query)
-    
+
     current_draft = update_draft_with_section(current_draft, updated_section, plan.main_query)
-    
+
     # Mark sub-question as completed
     sub_question.status = "completed"
     sub_question.findings = updated_section.content[:500]
     sub_question.citations = updated_section.citations
     plan.sub_questions[idx] = sub_question
-    
+
     print(f"[SYNTHESIZER] Updated section: {updated_section.title}")
     print(f"[SYNTHESIZER] Draft now has {len(current_draft.sections)} sections")
-    
+
     # Serialize new citations if any
     serialized_new_citations = [serialize_citation(c) for c in new_citations]
-    
+
     return {
         "research_plan": serialize_plan(plan),
         "draft": serialize_draft(current_draft),
@@ -435,28 +405,28 @@ def synthesize_node(state: DeepResearchGraphState) -> dict:
     }
 
 
-def critique_node(state: DeepResearchGraphState) -> dict:
+def critique_node(state: DeepResearchGraphState) -> Dict[str, Any]:
     """
     Critique node - Evaluates the draft and determines next action.
     """
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("[CRITIC] Evaluating research quality...")
-    print(f"{'='*60}")
-    
+    print(f"{'=' * 60}")
+
     plan_data = state["research_plan"]
     plan = deserialize_plan(plan_data)
-    
+
     draft_data = state.get("draft")
     draft = deserialize_draft(draft_data) if draft_data else None
-    
+
     all_citations = [deserialize_citation(c) for c in state.get("citations", [])]
-    
+
     iteration = state.get("iteration", 0) + 1
     max_iterations = state.get("max_iterations", DEFAULT_STOP_CONFIG.max_iterations)
-    
+
     # Get critique history
     critique_history = [deserialize_critique(c) for c in state.get("critique_history", [])]
-    
+
     # Perform critique
     critique, next_action = critique_draft(
         draft=draft,
@@ -467,7 +437,7 @@ def critique_node(state: DeepResearchGraphState) -> dict:
         critique_history=critique_history,
         stop_config=DEFAULT_STOP_CONFIG
     )
-    
+
     # Log critique results
     metrics = critique.quality_metrics
     print(f"[CRITIC] Iteration {iteration}/{max_iterations}")
@@ -475,7 +445,7 @@ def critique_node(state: DeepResearchGraphState) -> dict:
     print(f"[CRITIC] Depth: {metrics.depth_score:.2f}")
     print(f"[CRITIC] Completeness: {metrics.completeness_score:.2f}")
     print(f"[CRITIC] Recommended action: {next_action}")
-    
+
     # Determine next phase
     if next_action == "finalize" or next_action == "stop":
         next_phase = ResearchPhase.FINALIZING.value
@@ -485,7 +455,7 @@ def critique_node(state: DeepResearchGraphState) -> dict:
         next_phase = ResearchPhase.RESEARCHING.value
         is_complete = False
         completion_reason = None
-    
+
     return {
         "latest_critique": serialize_critique(critique),
         "critique_history": [serialize_critique(critique)],
@@ -497,17 +467,17 @@ def critique_node(state: DeepResearchGraphState) -> dict:
     }
 
 
-def finalize_node(state: DeepResearchGraphState) -> dict:
+def finalize_node(state: DeepResearchGraphState) -> Dict[str, Any]:
     """
     Finalize node - Generates the final polished report.
     """
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("[REPORT GENERATOR] Creating final report...")
-    print(f"{'='*60}")
-    
+    print(f"{'=' * 60}")
+
     plan_data = state["research_plan"]
     plan = deserialize_plan(plan_data)
-    
+
     draft_data = state.get("draft")
     if not draft_data:
         return {
@@ -516,10 +486,10 @@ def finalize_node(state: DeepResearchGraphState) -> dict:
             "phase": ResearchPhase.COMPLETE.value,
             "messages": [AIMessage(content="Error: No draft to finalize")]
         }
-    
+
     draft = deserialize_draft(draft_data)
     all_citations = [deserialize_citation(c) for c in state.get("citations", [])]
-    
+
     # Get quality metrics from latest critique
     critique_data = state.get("latest_critique")
     if critique_data:
@@ -533,7 +503,7 @@ def finalize_node(state: DeepResearchGraphState) -> dict:
             coherence_score=0.5,
             completeness_score=0.5
         )
-    
+
     # Generate final report
     final_report, metadata = generate_final_report(
         draft=draft,
@@ -541,32 +511,29 @@ def finalize_node(state: DeepResearchGraphState) -> dict:
         citations=all_citations,
         quality_metrics=quality_metrics
     )
-    
+
     # Format and calculate statistics
     final_report = format_report_as_markdown(final_report)
     stats = calculate_report_statistics(final_report, all_citations)
-    
+
     metadata.update(stats)
     metadata["completion_reason"] = state.get("completion_reason", "Unknown")
     metadata["iterations"] = state.get("iteration", 0)
-    
+
     print(f"[REPORT GENERATOR] Report generated:")
     print(f"  - Words: {stats['word_count']}")
     print(f"  - Sections: {stats['section_count']}")
     print(f"  - Citations: {stats['citation_references']}")
-    
+
     return {
         "final_report": final_report,
         "report_metadata": metadata,
         "phase": ResearchPhase.COMPLETE.value,
         "is_complete": True,
-        "messages": [AIMessage(content=f"Final report generated: {stats['word_count']} words, {stats['section_count']} sections")]
+        "messages": [AIMessage(
+            content=f"Final report generated: {stats['word_count']} words, {stats['section_count']} sections")]
     }
 
-
-# ============================================================================
-# CONDITIONAL EDGES
-# ============================================================================
 
 def route_after_critique(state: DeepResearchGraphState) -> str:
     """
@@ -574,7 +541,7 @@ def route_after_critique(state: DeepResearchGraphState) -> str:
     """
     phase = state.get("phase", "")
     is_complete = state.get("is_complete", False)
-    
+
     if is_complete or phase == ResearchPhase.FINALIZING.value:
         return "finalize"
     else:
@@ -586,10 +553,10 @@ def check_if_done(state: DeepResearchGraphState) -> str:
     Check if the research is complete.
     """
     phase = state.get("phase", "")
-    
+
     if phase == ResearchPhase.COMPLETE.value:
         return END
-    
+
     return "continue"
 
 
@@ -599,21 +566,21 @@ def check_if_done(state: DeepResearchGraphState) -> str:
 
 def build_deep_research_graph(checkpointer=None):
     """Build the deep research state graph."""
-    
+
     builder = StateGraph(DeepResearchGraphState)
-    
+
     # Add nodes
     builder.add_node("plan", planning_node)
     builder.add_node("research", research_node)
     builder.add_node("synthesize", synthesize_node)
     builder.add_node("critique", critique_node)
     builder.add_node("finalize", finalize_node)
-    
+
     # Add edges
     builder.add_edge("plan", "research")
     builder.add_edge("research", "synthesize")
     builder.add_edge("synthesize", "critique")
-    
+
     # Conditional edge after critique
     builder.add_conditional_edges(
         "critique",
@@ -623,28 +590,17 @@ def build_deep_research_graph(checkpointer=None):
             "finalize": "finalize"
         }
     )
-    
-    # End after finalize
+
     builder.add_edge("finalize", END)
-    
-    # Set entry point
     builder.set_entry_point("plan")
-    
-    # Compile
+
     if checkpointer:
         graph = builder.compile(checkpointer=checkpointer)
     else:
         graph = builder.compile()
-    
+
     return graph
 
-
-# ============================================================================
-# MAIN GRAPH INSTANCE
-# ============================================================================
-
-# Create checkpointer
-checkpointer = SqliteSaver.from_conn_string(CHECKPOINT_DB)
 
 # Build the graph
 deep_research_graph = build_deep_research_graph(checkpointer=checkpointer)
@@ -664,11 +620,11 @@ except Exception as e:
 # ============================================================================
 
 def run_deep_research(
-    query: str,
-    thread_id: Optional[str] = None,
-    max_iterations: int = 5,
-    stream: bool = True
-) -> dict:
+        query: str,
+        thread_id: str | None = None,
+        max_iterations: int = 5,
+        stream: bool = True
+) -> Dict[str, Any]:
     """
     Run the deep research agent on a query.
     
@@ -683,9 +639,9 @@ def run_deep_research(
     """
     if thread_id is None:
         thread_id = f"research_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    
-    config = {"configurable": {"thread_id": thread_id}}
-    
+
+    config = RunnableConfig(configurable={"thread_id": thread_id})
+
     initial_state = {
         "original_query": query,
         "research_plan": None,
@@ -704,62 +660,62 @@ def run_deep_research(
         "report_metadata": None,
         "messages": [HumanMessage(content=query)]
     }
-    
-    print(f"\n{'='*80}")
+
+    print(f"\n{'=' * 80}")
     print(f"DEEP RESEARCH AGENT")
-    print(f"{'='*80}")
+    print(f"{'=' * 80}")
     print(f"Query: {query}")
     print(f"Thread ID: {thread_id}")
     print(f"Max Iterations: {max_iterations}")
-    print(f"{'='*80}\n")
-    
+    print(f"{'=' * 80}\n")
+
     if stream:
         final_state = None
         for i, chunk in enumerate(deep_research_graph.stream(initial_state, config)):
             node_name = list(chunk.keys())[0]
             update = chunk[node_name]
-            
+
             phase = update.get("phase", "")
             print(f"\n[Step {i}] Node: {node_name} | Phase: {phase}")
-            
+
             if update.get("messages"):
                 for msg in update["messages"]:
                     if isinstance(msg, AIMessage):
                         print(f"  → {msg.content[:100]}...")
-            
+
             final_state = chunk
-        
+
         return final_state
     else:
-        return deep_research_graph.invoke(initial_state, config)
+        return deep_research_graph.invoke(initial_state, config=config)
 
 
-def get_research_state(thread_id: str) -> Optional[dict]:
+def get_research_state(thread_id: str) -> Dict[str, Any] | None:
     """Get the current state for a research thread."""
-    config = {"configurable": {"thread_id": thread_id}}
+    config = RunnableConfig(configurable={"thread_id": thread_id})
     state = deep_research_graph.get_state(config)
     return state.values if state else None
 
 
-def resume_research(thread_id: str) -> dict:
+def resume_research(thread_id: str) -> Dict[str, Any]:
     """Resume a paused or interrupted research session."""
-    config = {"configurable": {"thread_id": thread_id}}
+    config: RunnableConfig = RunnableConfig(configurable={"thread_id": thread_id})
     state = deep_research_graph.get_state(config)
-    
+
     if not state or not state.values:
         raise ValueError(f"No state found for thread: {thread_id}")
-    
+
     print(f"Resuming research from thread: {thread_id}")
     print(f"Current phase: {state.values.get('phase')}")
     print(f"Iteration: {state.values.get('iteration')}")
-    
+
     # Continue from current state
     final_state = None
     for chunk in deep_research_graph.stream(None, config):
         node_name = list(chunk.keys())[0]
         print(f"Resumed at node: {node_name}")
         final_state = chunk
-    
+
     return final_state
 
 
@@ -770,26 +726,26 @@ if __name__ == "__main__":
     I want to understand the current landscape, key players, 
     startup funding, challenges, and future trends.
     """
-    
+
     result = run_deep_research(
         query=test_query,
         max_iterations=3,
         stream=True
     )
-    
+
     if result:
         # Get the final node's output
         final_output = list(result.values())[0]
-        
+
         if final_output.get("final_report"):
-            print("\n" + "="*80)
+            print("\n" + "=" * 80)
             print("FINAL REPORT")
-            print("="*80)
+            print("=" * 80)
             print(final_output["final_report"][:3000])
             print("\n... (truncated)")
-            
+
             if final_output.get("report_metadata"):
-                print("\n" + "="*80)
+                print("\n" + "=" * 80)
                 print("REPORT METADATA")
-                print("="*80)
+                print("=" * 80)
                 print(json.dumps(final_output["report_metadata"], indent=2))

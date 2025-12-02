@@ -1,6 +1,14 @@
 {
+  "$schema": "https://langchain-ai.github.io/langgraph/schemas/langgraph.json",
   "graphs": {
-    "reflection_agent": "./reflection_agent/main.py:graph"
+    "reflection_agent": {
+      "path": "./reflection_agent/main.py:graph",
+      "description": "A reflection agent that drafts answers, searches for information, and iteratively revises responses using structured output"
+    },
+    "deep_research_agent": {
+      "path": "./deep_research_agent/graph.py:deep_research_graph",
+      "description": "A comprehensive multi-agent system for conducting deep research on any topic with planning, research, synthesis, critique, and report generation"
+    }
   },
   "env": "../.env",
   "python_version": "3.12",
