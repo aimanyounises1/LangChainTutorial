@@ -1,275 +1,247 @@
-# LangChain & LangGraph Tutorial
+<p align="center">
+  <img src="https://img.shields.io/badge/LangChain-2.0+-blue?style=for-the-badge&logo=chainlink" alt="LangChain"/>
+  <img src="https://img.shields.io/badge/LangGraph-0.3+-green?style=for-the-badge&logo=graphql" alt="LangGraph"/>
+  <img src="https://img.shields.io/badge/Python-3.12+-yellow?style=for-the-badge&logo=python" alt="Python"/>
+  <img src="https://img.shields.io/badge/License-MIT-red?style=for-the-badge" alt="License"/>
+</p>
 
-A comprehensive tutorial project demonstrating modern LangChain and LangGraph patterns including agents, chains, RAG, reflection agents, and graph-based workflows.
+<h1 align="center">LangChain & LangGraph Tutorial</h1>
 
-## Project Structure
+<p align="center">
+  <strong>A hands-on tutorial for building intelligent AI agents with LangChain and LangGraph</strong>
+</p>
 
-```
-LangChainTutorial/
-├── agents/                              # Classic LangChain agents
-│   ├── react_agent.py                   # ReAct agent with AgentExecutor
-│   ├── react_agent_2.py                 # Alternative ReAct implementation
-│   ├── react_search_agent.py            # ReAct with LCEL output parsing
-│   └── search_agent.py                  # Search agent with structured output
-│
-├── langgraph_examples/                  # LangGraph agents (modern approach)
-│   ├── react_agent.py                   # Prebuilt ReAct agent
-│   ├── custom_graph.py                  # Custom graph-based workflow
-│   ├── structured_output.py             # Agent with typed responses
-│   ├── main.py                          # ReAct with function calling
-│   ├── nodes.py                         # Node definitions for graphs
-│   ├── react.py                         # LLM and tools configuration
-│   ├── chain.py                         # Prompt chains for reflection
-│   ├── reflection.py                    # Basic reflection graph (generate → reflect)
-│   │
-│   ├── reflection_agent/                # Advanced Reflexion Agent
-│   │   ├── main.py                      # Graph: draft → execute_tools → revise
-│   │   ├── schemas.py                   # AnswerQuestion, ReviseAnswer, Reflection
-│   │   ├── chains.py                    # with_structured_output() chains
-│   │   ├── tools_executor.py            # Tavily search tool execution
-│   │   └── text_tool_call_parser.py     # Fallback parser for text-based tool calls
-│   │
-│   └── deep_research_agent/             # Multi-Agent Deep Research System
-│       ├── graph.py                     # Main StateGraph orchestration
-│       ├── schemas.py                   # ResearchPlan, DeepResearchState, etc.
-│       ├── main.py                      # Entry point for standalone execution
-│       ├── text_parser.py               # Text-based tool call parsing
-│       ├── langgraph.json               # LangGraph Studio configuration
-│       └── agents/                      # Specialized sub-agents
-│           ├── planner.py               # Research plan with sub-questions
-│           ├── researcher.py            # Tavily search execution
-│           ├── synthesizer.py           # Findings → draft integration
-│           ├── critic.py                # Quality evaluation
-│           └── report_generator.py      # Final report formatting
-│
-├── chains/                              # LCEL chain examples
-│   └── lcel_structured_example.py       # Modern LCEL patterns
-│
-├── rag/                                 # RAG implementation
-│   ├── ingestion.py                     # Document loading & indexing
-│   ├── ingestion_with_tavily_rag.py     # Advanced: Tavily Crawl/Map/Extract
-│   └── retrieval.py                     # Query & retrieval chains
-│
-├── core/                                # Shared utilities
-│   ├── schemas.py                       # Pydantic models & prompts
-│   └── tools.py                         # LangChain tools
-│
-├── docs/                                # Documentation
-│   ├── LCEL_EXPLANATION.md              # LCEL deep dive
-│   └── QUICK_REFERENCE.md               # Quick reference guide
-│
-├── main.py                              # Basic LLM example
-├── pyproject.toml                       # Dependencies
-└── .env.example                         # Environment template
+<p align="center">
+  <a href="#-quick-start">Quick Start</a> •
+  <a href="#-features">Features</a> •
+  <a href="#-project-structure">Structure</a> •
+  <a href="#-examples">Examples</a> •
+  <a href="#-documentation">Docs</a>
+</p>
+
+---
+
+## What You'll Learn
+
+| Pattern | Description | Location |
+|---------|-------------|----------|
+| **ReAct Agent** | Reasoning + Acting loop with tool use | `langgraph_examples/react_agent.py` |
+| **Reflexion Agent** | Self-improving agent with iterative refinement | `langgraph_examples/reflection_agent/` |
+| **Deep Research** | Multi-agent system for comprehensive research | `langgraph_examples/deep_research_agent/` |
+| **RAG Pipeline** | Retrieval Augmented Generation with Pinecone | `rag/` |
+| **LCEL Chains** | Composable pipelines with LangChain Expression Language | `chains/` |
+
+---
+
+## Quick Start
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/aimanyounises1/LangChainTutorial.git
+cd LangChainTutorial
+
+# 2. Set up environment
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+
+# 3. Install dependencies
+pip install -e .
+
+# 4. Configure API keys
+cp .env.example .env
+# Edit .env with your keys (Tavily, Pinecone, etc.)
+
+# 5. Run your first agent!
+python -m langgraph_examples.react_agent
 ```
 
-## LangChain vs LangGraph
+<details>
+<summary><strong>Prerequisites</strong></summary>
 
-| Feature | LangChain (Classic) | LangGraph (Modern) |
-|---------|--------------------|--------------------|
-| **Architecture** | Sequential chains | Graph-based workflows |
-| **State** | Limited | Built-in state management |
-| **Control Flow** | Linear | Conditional branching, loops |
-| **Best For** | Simple pipelines | Complex agent workflows |
-| **Location** | `agents/` | `langgraph_examples/` |
+- **Python 3.12+**
+- **[Ollama](https://ollama.ai/)** - Local LLM inference
+  - `ollama pull qwen3:30b-a3b` (or your preferred model)
+- **API Keys:**
+  - [Tavily](https://tavily.com/) - Web search (required)
+  - [Pinecone](https://pinecone.io/) - Vector store (for RAG)
+  - [LangSmith](https://smith.langchain.com/) - Tracing (optional)
+
+</details>
+
+---
 
 ## Features
 
-### 1. LangGraph Agents (`langgraph_examples/`)
+### 1. ReAct Agent
 
-Modern graph-based agents using LangGraph 0.3+:
+The classic Reasoning + Acting pattern for tool-augmented LLMs.
 
 ```python
 from langgraph.prebuilt import create_react_agent
 
-agent = create_react_agent(
-    model=llm,
-    tools=[search_web],
-    response_format=ResponseSchema,  # Optional structured output
-)
-result = agent.invoke({"messages": [{"role": "user", "content": "query"}]})
+agent = create_react_agent(model=llm, tools=[search_tool])
+result = agent.invoke({"messages": [{"role": "user", "content": "What's the weather?"}]})
 ```
 
-**Files:**
-- `react_agent.py` - Prebuilt ReAct agent with Tavily search
-- `custom_graph.py` - Custom graph with nodes, edges, and state
-- `structured_output.py` - Typed responses with Pydantic
-- `main.py` - ReAct pattern with function calling
-- `reflection.py` - Basic reflection loop (generate → reflect → repeat)
+```
+Think → Act → Observe → Repeat
+```
 
-### 2. Reflexion Agent (`langgraph_examples/reflection_agent/`)
+---
 
-Advanced self-improving agent that uses reflection to iteratively enhance responses:
+### 2. Reflexion Agent
+
+Self-improving agent that critiques and refines its own responses.
 
 ```
 ┌─────────┐     ┌───────────────┐     ┌─────────┐
-│  draft  │────▶│ execute_tools │────▶│ reviser │
-└─────────┘     └───────────────┘     └────┬────┘
-                       ▲                    │
-                       │                    │
-                       └────────────────────┘
-                         (loop until done)
+│  Draft  │────▶│ Execute Tools │────▶│ Reviser │──┐
+└─────────┘     └───────────────┘     └─────────┘  │
+     ▲                                             │
+     └─────────────────────────────────────────────┘
+                   (loop until quality threshold)
 ```
-
-**How it works:**
-1. **Draft** - First responder generates initial answer with reflection
-2. **Execute Tools** - Runs Tavily search queries to gather information
-3. **Revise** - Improves answer based on search results and self-critique
-4. **Loop** - Repeats until max iterations or empty search_queries
 
 **Key Features:**
-- Uses `with_structured_output()` for direct Pydantic returns
-- Built-in retry with `.with_retry()` for resilience
+- Structured output with Pydantic models
 - SQLite checkpointing for state persistence
-- RetryPolicy on nodes for transient error handling
+- Built-in retry policies for resilience
 
-**Files:**
-- `main.py` - StateGraph orchestration with SQLite checkpointer
-- `schemas.py` - `AnswerQuestion`, `ReviseAnswer`, `Reflection` models
-- `chains.py` - Structured output chains with automatic retry
-- `tools_executor.py` - Tavily search execution
-- `text_tool_call_parser.py` - Fallback parser for text-based tool calls
-
-### 3. Deep Research Agent (`langgraph_examples/deep_research_agent/`)
-
-Multi-agent system for comprehensive research with iterative refinement:
-
-```
-┌─────────────┐
-│   START     │
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐     Creates ResearchPlan with sub-questions
-│   Planner   │────────────────────────────────────────────►
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐     Executes Tavily searches for each sub-question
-│ Researcher  │────────────────────────────────────────────►
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐     Integrates findings into draft sections
-│ Synthesizer │────────────────────────────────────────────►
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐     Evaluates quality, identifies gaps
-│   Critic    │────────────────────────────────────────────►
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│ Continue?   │──── YES ──► Back to Researcher
-│             │
-│             │──── NO  ──► Report Generator ──► END
-└─────────────┘
+```bash
+python -m langgraph_examples.reflection_agent.main
 ```
 
-**Research Phases:**
-1. **PLANNING** - Analyze query, create sub-questions, define methodology
-2. **RESEARCHING** - Execute targeted searches for each sub-question
-3. **SYNTHESIZING** - Integrate findings with proper citations
-4. **CRITIQUING** - Evaluate coverage, depth, and completeness
-5. **FINALIZING** - Generate polished report with references
+---
+
+### 3. Deep Research Agent
+
+Multi-agent system for comprehensive, citation-backed research.
+
+```
+                    ┌──────────────┐
+                    │   Planner    │  ← Creates research plan
+                    └──────┬───────┘
+                           │
+                           ▼
+                    ┌──────────────┐
+              ┌────▶│  Researcher  │  ← Executes searches
+              │     └──────┬───────┘
+              │            │
+              │            ▼
+              │     ┌──────────────┐
+              │     │ Synthesizer  │  ← Integrates findings
+              │     └──────┬───────┘
+              │            │
+              │            ▼
+              │     ┌──────────────┐
+              │     │    Critic    │  ← Evaluates quality
+              │     └──────┬───────┘
+              │            │
+              │     ┌──────┴───────┐
+              │     │  Continue?   │
+              │     └──────┬───────┘
+              │       YES  │  NO
+              └────────────┘   │
+                               ▼
+                    ┌──────────────┐
+                    │    Report    │  ← Generates final output
+                    └──────────────┘
+```
 
 **Quality Metrics:**
-- Coverage Score (sub-questions addressed)
-- Depth Score (analysis quality)
-- Citation Density (sources per section)
-- Completeness Score (overall quality)
+- Coverage Score - Sub-questions addressed
+- Depth Score - Analysis quality
+- Citation Density - Sources per section
+- Completeness - Overall quality
 
-**Files:**
-- `graph.py` - Main StateGraph with phase transitions
-- `schemas.py` - `DeepResearchState`, `ResearchPlan`, `SubQuestion`, etc.
-- `agents/planner.py` - Research plan generation
-- `agents/researcher.py` - Tavily search with batch execution
-- `agents/synthesizer.py` - Draft section creation
-- `agents/critic.py` - Quality evaluation and gap identification
-- `agents/report_generator.py` - Final report formatting
-
-**LangGraph Studio:**
-Compatible with LangGraph Studio for visual debugging. Run with:
 ```bash
+# Standalone
+python -m langgraph_examples.deep_research_agent.main "Your research query"
+
+# With LangGraph Studio
 langgraph dev --config langgraph_examples/deep_research_agent/langgraph.json
 ```
 
-### 4. Classic LangChain Agents (`agents/`)
+---
 
-Traditional AgentExecutor-based agents:
+### 4. RAG Pipeline
 
-```python
-from langchain.agents import create_react_agent, AgentExecutor
+Retrieval Augmented Generation with multiple ingestion strategies.
 
-agent = create_react_agent(llm=llm, tools=tools, prompt=prompt)
-executor = AgentExecutor(agent=agent, tools=tools)
-result = executor.invoke({"input": "query"})
-```
-
-### 5. LCEL Chains (`chains/`)
-
-LangChain Expression Language for composable pipelines:
-
-```python
-# Build chain with pipe operator
-chain = prompt | llm.with_structured_output(Schema) | parser
-
-# Execute
-result = chain.invoke({"query": "input"})
-```
-
-### 6. RAG Pipeline (`rag/`)
-
-Retrieval Augmented Generation with Pinecone:
-
-- **Basic Ingestion** (`ingestion.py`): Load → Split → Embed → Store
-- **Advanced Ingestion** (`ingestion_with_tavily_rag.py`):
-  - Tavily Crawl for deep website scraping
-  - Tavily Map for sitemap discovery
-  - Tavily Extract for content extraction
-  - Async batch processing for performance
-- **Retrieval** (`retrieval.py`): Query → Retrieve → Generate
-
-### 7. Core Utilities (`core/`)
-
-Shared components:
-- `schemas.py` - `AgentResponse`, `Source`, `REACT_PROMPT_TEMPLATE`
-- `tools.py` - `search_tool` for Tavily
-
-## Prerequisites
-
-- **Python 3.12+**
-- **[Ollama](https://ollama.ai/)** with models:
-  - `qwen3:30b-a3b` (or preferred model)
-  - `qwen3-embedding:latest` (for RAG)
-- **API Keys:**
-  - [Tavily](https://tavily.com/) - Web search
-  - [Pinecone](https://pinecone.io/) - Vector store
-  - [LangSmith](https://smith.langchain.com/) - Tracing (optional)
-
-## Installation
+| Method | Description | Use Case |
+|--------|-------------|----------|
+| **Basic** | Load → Split → Embed → Store | Local documents |
+| **Tavily Crawl** | Deep website scraping | Web content |
+| **Tavily Extract** | Targeted content extraction | Specific pages |
 
 ```bash
-# Clone
-git clone https://github.com/aimanyounises1/LangChainTutorial.git
-cd LangChainTutorial
+# Ingest documents
+python -m rag.ingestion
 
-# Virtual environment
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-
-# Install
-pip install -e .
-# Or with uv:
-uv sync
-
-# Environment
-cp .env.example .env
-# Edit .env with your API keys
+# Query with RAG
+python -m rag.retrieval
 ```
 
+---
+
+## Project Structure
+
+<details>
+<summary><strong>Click to expand</strong></summary>
+
+```
+LangChainTutorial/
+│
+├── langgraph_examples/           # Modern LangGraph agents
+│   ├── react_agent.py            # Prebuilt ReAct agent
+│   ├── custom_graph.py           # Custom graph workflows
+│   ├── reflection.py             # Basic reflection loop
+│   │
+│   ├── reflection_agent/         # Advanced Reflexion
+│   │   ├── main.py               # Graph orchestration
+│   │   ├── schemas.py            # Pydantic models
+│   │   ├── chains.py             # LLM chains
+│   │   └── tools_executor.py     # Tool execution
+│   │
+│   └── deep_research_agent/      # Multi-agent research
+│       ├── graph.py              # StateGraph orchestration
+│       ├── schemas.py            # Research models
+│       ├── main.py               # CLI entry point
+│       └── agents/               # Specialized agents
+│           ├── planner.py
+│           ├── researcher.py
+│           ├── synthesizer.py
+│           ├── critic.py
+│           └── report_generator.py
+│
+├── agents/                       # Classic LangChain agents
+│   ├── react_agent.py
+│   └── search_agent.py
+│
+├── rag/                          # RAG implementation
+│   ├── ingestion.py
+│   ├── ingestion_with_tavily_rag.py
+│   └── retrieval.py
+│
+├── chains/                       # LCEL examples
+│   └── lcel_structured_example.py
+│
+├── core/                         # Shared utilities
+│   ├── schemas.py
+│   └── tools.py
+│
+└── docs/                         # Documentation
+    ├── LCEL_EXPLANATION.md
+    └── QUICK_REFERENCE.md
+```
+
+</details>
+
+---
+
 ## Environment Variables
+
+Create a `.env` file with:
 
 ```env
 # Required
@@ -277,153 +249,137 @@ TAVILY_API_KEY=your_tavily_key
 PINECONE_API_KEY=your_pinecone_key
 INDEX_NAME=langchain-rag
 
-# Optional (tracing)
+# Optional (for tracing)
 LANGCHAIN_API_KEY=your_langsmith_key
 LANGCHAIN_TRACING_V2=true
 LANGCHAIN_PROJECT=LangChain Tutorial
 ```
 
-## Usage
+---
 
-### LangGraph Agents (Recommended)
+## Examples
 
-```bash
-# Prebuilt ReAct agent
-python -m langgraph_examples.react_agent
-
-# Custom graph workflow
-python -m langgraph_examples.custom_graph
-
-# ReAct with function calling
-python -m langgraph_examples.main
-
-# Basic reflection loop
-python -m langgraph_examples.reflection
-
-# Advanced Reflexion agent
-python -m langgraph_examples.reflection_agent.main
-
-# Deep Research Agent (standalone)
-python -m langgraph_examples.deep_research_agent.main
-
-# Deep Research Agent (LangGraph Studio)
-langgraph dev --config langgraph_examples/deep_research_agent/langgraph.json
-```
-
-### Classic LangChain Agents
-
-```bash
-python -m agents.react_agent
-python -m agents.search_agent
-```
-
-### LCEL Chains
-
-```bash
-python -m chains.lcel_structured_example
-```
-
-### RAG Pipeline
-
-```bash
-# Basic ingestion
-python -m rag.ingestion
-
-# Advanced ingestion with Tavily
-python -m rag.ingestion_with_tavily_rag
-
-# Query
-python -m rag.retrieval
-```
-
-## Key Concepts
-
-### ReAct Pattern
-
-Reasoning and Acting loop:
-1. **Thought** - Analyze the problem
-2. **Action** - Choose and execute a tool
-3. **Observation** - Process tool result
-4. **Repeat** until final answer
-
-### Reflexion Pattern
-
-Self-improving agent loop:
-1. **Draft** - Generate initial response with self-critique
-2. **Search** - Research to address identified gaps
-3. **Revise** - Improve answer with citations
-4. **Repeat** until quality threshold met
-
-### Deep Research Pattern
-
-Multi-agent research system:
-1. **Plan** - Decompose query into sub-questions with MECE principle
-2. **Research** - Execute targeted searches per sub-question
-3. **Synthesize** - Integrate findings into structured draft
-4. **Critique** - Evaluate quality metrics and identify gaps
-5. **Iterate** - Loop back to research if below threshold
-6. **Finalize** - Generate polished report with citations
-
-### LangGraph State Machine
-
-```
-START → agent → [tools → agent]* → END
-         ↓           ↑
-    (decide)    (loop back)
-```
-
-### LCEL Pipe Operator
+<details>
+<summary><strong>Basic ReAct Agent</strong></summary>
 
 ```python
-# Build BEFORE execution
-chain = step1 | step2 | step3
+from langchain_ollama import ChatOllama
+from langgraph.prebuilt import create_react_agent
+from core.tools import search_tool
 
-# Then execute
-result = chain.invoke(input)
+llm = ChatOllama(model="qwen3:30b-a3b")
+agent = create_react_agent(model=llm, tools=[search_tool])
+
+result = agent.invoke({
+    "messages": [{"role": "user", "content": "What is LangGraph?"}]
+})
+print(result["messages"][-1].content)
 ```
 
-### Structured Outputs
+</details>
+
+<details>
+<summary><strong>Structured Output</strong></summary>
 
 ```python
-class Response(BaseModel):
+from pydantic import BaseModel
+from typing import List
+
+class ResearchResult(BaseModel):
     answer: str
-    sources: List[Source]
+    sources: List[str]
     confidence: float
 
-llm.with_structured_output(Response)
+llm_structured = llm.with_structured_output(ResearchResult)
+result = llm_structured.invoke("Explain quantum computing")
+print(result.answer)
+print(result.sources)
 ```
 
-## Dependencies
+</details>
 
-```toml
-langchain >= 1.1.0
-langchain-community >= 0.4.1
-langchainhub
-langchain-ollama >= 1.0.0
-langchain-openai >= 1.1.0
-langchain-pinecone >= 0.2.13
-langchain-tavily >= 0.2.13
-langchain-text-splitters >= 1.0.0
-langgraph >= 0.3.0
-grandalf >= 0.8
+<details>
+<summary><strong>Custom Graph</strong></summary>
+
+```python
+from langgraph.graph import StateGraph, END
+from typing import TypedDict
+
+class State(TypedDict):
+    messages: list
+    iteration: int
+
+def process_node(state: State):
+    return {"iteration": state["iteration"] + 1}
+
+graph = StateGraph(State)
+graph.add_node("process", process_node)
+graph.set_entry_point("process")
+graph.add_edge("process", END)
+
+app = graph.compile()
+result = app.invoke({"messages": [], "iteration": 0})
 ```
+
+</details>
+
+---
+
+## LangChain vs LangGraph
+
+| Aspect | LangChain (Classic) | LangGraph (Modern) |
+|--------|--------------------|--------------------|
+| **Architecture** | Sequential chains | Graph-based workflows |
+| **State Management** | Limited | Built-in state machine |
+| **Control Flow** | Linear | Conditional, loops, branches |
+| **Persistence** | Manual | Built-in checkpointing |
+| **Best For** | Simple pipelines | Complex agent workflows |
+
+**Recommendation:** Use LangGraph for new projects. It provides better control flow, state management, and debugging capabilities.
+
+---
 
 ## Documentation
 
-- [LCEL Explanation](docs/LCEL_EXPLANATION.md) - Understanding LCEL
-- [Quick Reference](docs/QUICK_REFERENCE.md) - Common patterns
+- [LCEL Explanation](docs/LCEL_EXPLANATION.md) - Deep dive into LangChain Expression Language
+- [Quick Reference](docs/QUICK_REFERENCE.md) - Common patterns and snippets
 
-## Resources
+## External Resources
 
-- [LangChain Docs](https://python.langchain.com/docs/tutorials/)
-- [LangGraph Docs](https://langchain-ai.github.io/langgraph/)
+- [LangChain Documentation](https://python.langchain.com/docs/tutorials/)
+- [LangGraph Documentation](https://langchain-ai.github.io/langgraph/)
 - [LangGraph GitHub](https://github.com/langchain-ai/langgraph)
-- [LangChain Architecture](https://python.langchain.com/docs/concepts/architecture/)
+- [Tavily API](https://docs.tavily.com/)
+
+---
+
+## Contributing
+
+Contributions are welcome! Feel free to:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+---
 
 ## License
 
-MIT
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## Author
+---
 
-Aiman Younises
+<p align="center">
+  <strong>Built by <a href="https://github.com/aimanyounises1">Aiman Younises</a></strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/aimanyounises1/LangChainTutorial/stargazers">
+    <img src="https://img.shields.io/github/stars/aimanyounises1/LangChainTutorial?style=social" alt="Stars"/>
+  </a>
+  <a href="https://github.com/aimanyounises1/LangChainTutorial/network/members">
+    <img src="https://img.shields.io/github/forks/aimanyounises1/LangChainTutorial?style=social" alt="Forks"/>
+  </a>
+</p>
