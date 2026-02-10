@@ -1,23 +1,42 @@
 import datetime
 import json
 import operator
+import os
 import sqlite3
 from pathlib import Path
-from typing import TypedDict, Annotated, List, Dict, Any
+from typing import TypedDict, Annotated, List, Dict, Any, Optional
 
 # Load environment variables BEFORE any langchain imports to enable LangSmith tracing!
 from dotenv import load_dotenv
+
 load_dotenv(verbose=True)
 
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import StateGraph, END
+
+
+def is_langgraph_api_environment() -> bool:
+    """
+    Detect if running under LangGraph API (langgraph dev / LangGraph Cloud).
+
+    When running under LangGraph API, the platform handles persistence automatically,
+    so we should NOT provide a custom checkpointer.
+    """
+    # LangGraph API sets these indicators when running
+    return (
+            os.getenv("LANGGRAPH_API_VARIANT") is not None or
+            os.getenv("LANGSERVE_GRAPHS") is not None or
+            "langgraph_api" in os.getenv("_", "") or
+            os.getenv("LANGGRAPH_RUNTIME") is not None
+    )
+
 
 from langgraph_examples.deep_research_agent.agents import (
     # Planner
-    planner_chain,
-    planner_parser,
+    create_research_plan,
     create_default_plan,
     validate_research_plan,
     # Researcher
@@ -42,9 +61,6 @@ from langgraph_examples.deep_research_agent.schemas import (
     QualityMetrics,
     StopConditionConfig,
 )
-from langgraph_examples.deep_research_agent.text_parser import (
-    parse_text_tool_calls,
-)
 
 # ============================================================================
 # CONFIGURATION
@@ -53,10 +69,16 @@ from langgraph_examples.deep_research_agent.text_parser import (
 CHECKPOINTS_DIR = Path(__file__).parent / "checkpoints"
 CHECKPOINTS_DIR.mkdir(exist_ok=True)
 CHECKPOINT_DB = str(CHECKPOINTS_DIR / "deep_research_state.db")
-# Use direct sqlite3 connection for persistent file-based storage
-# (from_conn_string returns a context manager, not a direct instance)
-_checkpoint_conn = sqlite3.connect(CHECKPOINT_DB, check_same_thread=False)
-checkpointer = SqliteSaver(_checkpoint_conn)
+
+# Only create SQLite checkpointer for standalone usage (not under LangGraph API)
+# LangGraph API provides its own persistence layer automatically
+_checkpoint_conn: Optional[sqlite3.Connection] = None
+checkpointer: Optional[SqliteSaver] = None
+
+if not is_langgraph_api_environment():
+    # Standalone mode: use SQLite for local persistence
+    _checkpoint_conn = sqlite3.connect(CHECKPOINT_DB, check_same_thread=False)
+    checkpointer = SqliteSaver(_checkpoint_conn)
 
 DEFAULT_STOP_CONFIG = StopConditionConfig(
     min_coverage_score=0.7,
@@ -222,36 +244,21 @@ def planning_node(state: DeepResearchGraphState) -> Dict[str, Any]:
     updates = {"original_query": query}
 
     try:
-        # Invoke planner chain
-        result = planner_chain.invoke({
-            "messages": [HumanMessage(content=query)]
-        })
+        # Create research plan using new API
+        plan, reasoning = create_research_plan(query, max_retries=2)
 
-        # Parse text-based tool calls if needed
-        if not result.tool_calls:
-            result = parse_text_tool_calls(result)
+        print(f"[PLANNER] Created plan with {len(plan.sub_questions)} sub-questions")
+        for sq in plan.sub_questions:
+            print(f"  [{sq.priority}] {sq.question}")
 
-        if result.tool_calls:
-            parsed = planner_parser.invoke(result)
-            if parsed:
-                plan = parsed.research_plan
-                is_valid, issues = validate_research_plan(plan)
-
-                if is_valid:
-                    print(f"[PLANNER] Created plan with {len(plan.sub_questions)} sub-questions")
-                    for sq in plan.sub_questions:
-                        print(f"  [{sq.priority}] {sq.question}")
-
-                    return {
-                        "original_query": query,  # Store for downstream nodes
-                        "research_plan": serialize_plan(plan),
-                        "phase": ResearchPhase.RESEARCHING.value,
-                        "current_sub_question_index": 0,
-                        "messages": [
-                            AIMessage(content=f"Created research plan with {len(plan.sub_questions)} sub-questions")]
-                    }
-                else:
-                    print(f"[PLANNER] Plan validation failed: {issues}")
+        return {
+            "original_query": query,  # Store for downstream nodes
+            "research_plan": serialize_plan(plan),
+            "phase": ResearchPhase.RESEARCHING.value,
+            "current_sub_question_index": 0,
+            "messages": [
+                AIMessage(content=f"Created research plan with {len(plan.sub_questions)} sub-questions")]
+        }
     except Exception as e:
         print(f"[PLANNER] Error: {e}")
 
@@ -564,9 +571,16 @@ def check_if_done(state: DeepResearchGraphState) -> str:
 # BUILD GRAPH
 # ============================================================================
 
-def build_deep_research_graph(checkpointer=None):
-    """Build the deep research state graph."""
+def build_deep_research_graph(checkpointer: Optional[BaseCheckpointSaver] = None):
+    """
+    Build the deep research state graph.
 
+    Args:
+        checkpointer: Optional checkpointer for state persistence.
+                     When running under LangGraph API (langgraph dev), this should be None
+                     as the platform provides its own persistence layer.
+                     For standalone usage, pass a SqliteSaver or other checkpointer.
+    """
     builder = StateGraph(DeepResearchGraphState)
 
     # Add nodes
@@ -603,6 +617,9 @@ def build_deep_research_graph(checkpointer=None):
 
 
 # Build the graph
+# Note: checkpointer is None when running under LangGraph API (langgraph dev),
+# which allows the platform to manage persistence automatically.
+# For standalone usage, checkpointer will be a SqliteSaver instance.
 deep_research_graph = build_deep_research_graph(checkpointer=checkpointer)
 
 # Visualize

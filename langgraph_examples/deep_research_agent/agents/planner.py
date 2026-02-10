@@ -10,10 +10,9 @@ The Planner agent is responsible for:
 
 import datetime
 import uuid
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.output_parsers import PydanticToolsParser
 from langchain_ollama import ChatOllama
 
 from langgraph_examples.deep_research_agent.schemas import (
@@ -37,33 +36,55 @@ Your task is to analyze the user's research query and create a detailed research
 
 2. **Define Clear Objectives**: Create a precise objective statement that captures the research goal.
 
-3. **Scope the Research**: Define boundaries - what's in scope and what's out of scope.
+3. **Scope the Research**: Define boundaries - what's in scope and what's out of scope AS A SINGLE STRING.
 
-4. **Break Down into Sub-Questions**: Decompose the main query into 4-7 specific, answerable sub-questions that together will comprehensively address the main query. Each sub-question should:
-   - Be specific and focused
-   - Be researchable (can find information online)
-   - Have a clear priority (1=highest, 3=lowest)
-   - Contribute to answering the main query
+4. **Break Down into Sub-Questions**: Decompose the main query into 4-7 specific, answerable sub-questions that together will comprehensively address the main query. Each sub-question MUST have:
+   - id: A unique string like "sq_001", "sq_002", etc.
+   - question: The specific question text
+   - priority: Integer 1, 2, or 3 (1=highest, 3=lowest)
 
-5. **Plan the Methodology**: Describe how the research will be conducted.
+5. **Plan the Methodology**: Describe how the research will be conducted AS A SINGLE STRING.
 
-6. **Structure the Output**: Define what sections the final report should contain.
+6. **Structure the Output**: Define what sections the final report should contain AS A LIST OF STRINGS.
 
-## Guidelines for Sub-Questions:
-- Start with foundational questions (definitions, context) at priority 1
-- Move to analytical questions (comparisons, evaluations) at priority 2
-- End with forward-looking questions (trends, predictions) at priority 3
-- Ensure sub-questions are mutually exclusive but collectively exhaustive (MECE)
+## CRITICAL: Output Format Requirements
+
+You MUST return a JSON object with EXACTLY this structure:
+
+```json
+{{
+  "research_plan": {{
+    "main_query": "The exact user query as a string",
+    "objective": "Clear objective statement as a string",
+    "scope": "Single string describing what is in and out of scope",
+    "sub_questions": [
+      {{"id": "sq_001", "question": "First question?", "priority": 1}},
+      {{"id": "sq_002", "question": "Second question?", "priority": 1}},
+      {{"id": "sq_003", "question": "Third question?", "priority": 2}},
+      {{"id": "sq_004", "question": "Fourth question?", "priority": 2}},
+      {{"id": "sq_005", "question": "Fifth question?", "priority": 3}}
+    ],
+    "methodology": "Single string describing the research approach",
+    "expected_sections": ["Section 1", "Section 2", "Section 3", "Section 4", "Section 5"]
+  }},
+  "reasoning": "Explanation of why this plan was chosen as a string"
+}}
+```
+
+## IMPORTANT RULES:
+- "scope" MUST be a single string, NOT an object with in_scope/out_of_scope keys
+- "methodology" MUST be a single string, NOT an object or list
+- Each sub_question MUST have "id", "question", and "priority" fields
+- "expected_sections" MUST be a list of strings
+- "reasoning" MUST be a top-level field in the output
 
 Current time: {time}
-
-You MUST use the PlannerOutput tool to provide your research plan.
 """
 
 PLANNER_PROMPT = ChatPromptTemplate.from_messages([
     ("system", PLANNER_SYSTEM_PROMPT),
     MessagesPlaceholder(variable_name="messages"),
-    ("system", "Create a comprehensive research plan for the query above. Use the PlannerOutput tool."),
+    ("system", "Create a comprehensive research plan for the query above. Return ONLY the JSON object with research_plan and reasoning fields. Remember: scope and methodology must be STRINGS, not objects. Each sub_question must have id, question, and priority."),
 ]).partial(time=lambda: datetime.datetime.now().isoformat())
 
 
@@ -71,14 +92,15 @@ PLANNER_PROMPT = ChatPromptTemplate.from_messages([
 # PLANNER LLM CONFIGURATION
 # ============================================================================
 
-def create_planner_llm(model_name: str = "qwen3:30b-a3b"):
-    """Create the LLM configured for the planner agent."""
+def create_planner_llm(model_name: str = "llama3.3:70b"):
+    """Create the LLM configured for the planner agent with structured output."""
     llm = ChatOllama(
         model=model_name,
         temperature=0,
         num_ctx=8192,
     )
-    return llm.bind_tools(tools=[PlannerOutput], tool_choice="PlannerOutput")
+    # Use with_structured_output for robust schema enforcement
+    return llm.with_structured_output(PlannerOutput, include_raw=True)
 
 
 # ============================================================================
@@ -88,8 +110,7 @@ def create_planner_llm(model_name: str = "qwen3:30b-a3b"):
 planner_llm = create_planner_llm()
 planner_chain = PLANNER_PROMPT | planner_llm
 
-# Parser for extracting structured output
-planner_parser = PydanticToolsParser(tools=[PlannerOutput], first_tool_only=True)
+# Note: No separate parser needed - with_structured_output handles parsing internally
 
 
 # ============================================================================
@@ -166,18 +187,86 @@ def validate_research_plan(plan: ResearchPlan) -> tuple[bool, List[str]]:
     return len(issues) == 0, issues
 
 
+# ============================================================================
+# HIGH-LEVEL PLANNING FUNCTION
+# ============================================================================
+
+def create_research_plan(
+    query: str,
+    max_retries: int = 2
+) -> Tuple[ResearchPlan, str]:
+    """
+    Create a research plan for the given query with retry logic.
+
+    Args:
+        query: The main research query
+        max_retries: Maximum number of retry attempts on validation failure
+
+    Returns:
+        (ResearchPlan, reasoning)
+    """
+    from langchain_core.messages import HumanMessage
+
+    prompt_vars = {
+        "messages": [HumanMessage(content=query)]
+    }
+
+    last_error = None
+    for attempt in range(max_retries + 1):
+        try:
+            result = planner_chain.invoke(prompt_vars)
+
+            # with_structured_output with include_raw=True returns dict with 'parsed' and 'raw'
+            if isinstance(result, dict) and 'parsed' in result:
+                parsed = result['parsed']
+                if parsed and isinstance(parsed, PlannerOutput):
+                    # Ensure sub-questions have proper IDs
+                    plan = parsed.research_plan
+                    for i, sq in enumerate(plan.sub_questions):
+                        if not sq.id or sq.id == "":
+                            sq.id = f"sq_{uuid.uuid4().hex[:8]}"
+                    return plan, parsed.reasoning
+            # Direct PlannerOutput return (without include_raw)
+            elif isinstance(result, PlannerOutput):
+                plan = result.research_plan
+                for i, sq in enumerate(plan.sub_questions):
+                    if not sq.id or sq.id == "":
+                        sq.id = f"sq_{uuid.uuid4().hex[:8]}"
+                return plan, result.reasoning
+
+        except Exception as e:
+            last_error = e
+            print(f"[Planner] Attempt {attempt + 1}/{max_retries + 1} Error: {e}")
+
+            # Add error context to prompt for retry
+            if attempt < max_retries:
+                error_feedback = f"\n\nPrevious attempt failed with error: {str(e)[:500]}\nPlease ensure you provide ALL required fields in PlannerOutput: research_plan (with main_query, objective, scope as string, sub_questions with id/question/priority, methodology, expected_sections) and reasoning."
+                prompt_vars["messages"] = [
+                    HumanMessage(content=f"{query}{error_feedback}")
+                ]
+
+    print(f"[Planner] All attempts failed. Last error: {last_error}")
+
+    # Fallback: create a default plan
+    return create_default_plan(query), "Fallback plan due to validation errors"
+
+
 if __name__ == "__main__":
     # Test the planner
     from langchain_core.messages import HumanMessage
-    
+
     test_query = "What are the best practices for implementing AI-powered cybersecurity solutions in enterprise environments?"
-    
+
     print("Testing Planner Agent...")
     print(f"Query: {test_query}\n")
-    
-    result = planner_chain.invoke({"messages": [HumanMessage(content=test_query)]})
-    print(f"Raw result: {result}")
-    
-    if result.tool_calls:
-        parsed = planner_parser.invoke(result)
-        print(f"\nParsed plan: {parsed}")
+
+    plan, reasoning = create_research_plan(test_query)
+    print(f"Research Plan:")
+    print(f"  - Main Query: {plan.main_query}")
+    print(f"  - Objective: {plan.objective}")
+    print(f"  - Scope: {plan.scope}")
+    print(f"  - Sub-questions: {len(plan.sub_questions)}")
+    for sq in plan.sub_questions:
+        print(f"    [{sq.priority}] {sq.question}")
+    print(f"  - Expected Sections: {plan.expected_sections}")
+    print(f"  - Reasoning: {reasoning}")

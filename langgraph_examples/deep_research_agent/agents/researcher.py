@@ -11,11 +11,11 @@ The Researcher agent is responsible for:
 import datetime
 from typing import List, Dict, Any, Tuple
 
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from dotenv import load_dotenv
 from langchain_core.output_parsers import PydanticToolsParser
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_ollama import ChatOllama
 from langchain_tavily import TavilySearch
-from dotenv import load_dotenv
 
 from langgraph_examples.deep_research_agent.schemas import (
     ResearcherOutput,
@@ -56,7 +56,6 @@ Your task is to generate optimal search queries to investigate a specific sub-qu
 - Include industry-specific terminology when relevant
 - Use quotes for exact phrases when needed
 - Consider different angles (definition, examples, comparisons, recent news)
-- Include year or "2024" for time-sensitive topics
 
 Current time: {time}
 
@@ -74,7 +73,7 @@ RESEARCHER_PROMPT = ChatPromptTemplate.from_messages([
 # RESEARCHER LLM CONFIGURATION
 # ============================================================================
 
-def create_researcher_llm(model_name: str = "qwen3:30b-a3b"):
+def create_researcher_llm(model_name: str = "llama3.3:70b"):
     """Create the LLM configured for the researcher agent."""
     llm = ChatOllama(
         model=model_name,
@@ -141,7 +140,7 @@ def execute_search_queries(queries: List[str]) -> Tuple[str, List[Dict[str, Any]
             url = item.get("url", "Unknown URL")
             title = item.get("title", "No title")
             content = item.get("content", "No content")
-            
+
             # Store raw result for citation creation
             all_raw_results.append({
                 "query": query,
@@ -150,24 +149,24 @@ def execute_search_queries(queries: List[str]) -> Tuple[str, List[Dict[str, Any]
                 "content": content,
                 "rank": j
             })
-            
+
             # Format for LLM
             formatted_chunks.append(f"""
 **Source {j}:** {title}
 - URL: {url}
 - Content: {content}
 """)
-        
+
         formatted_chunks.append("---")
-    
+
     content_str = "\n".join(formatted_chunks)
     return content_str, all_raw_results
 
 
 def create_citations_from_results(
-    raw_results: List[Dict[str, Any]],
-    sub_question_id: str,
-    existing_citation_count: int = 0
+        raw_results: List[Dict[str, Any]],
+        sub_question_id: str,
+        existing_citation_count: int = 0
 ) -> List[Citation]:
     """
     Create Citation objects from raw search results.
@@ -181,7 +180,7 @@ def create_citations_from_results(
         List of Citation objects
     """
     citations = []
-    
+
     for i, result in enumerate(raw_results):
         citation_num = existing_citation_count + i + 1
         citation = Citation(
@@ -192,7 +191,7 @@ def create_citations_from_results(
             accessed_for=sub_question_id
         )
         citations.append(citation)
-    
+
     return citations
 
 
@@ -212,10 +211,10 @@ researcher_parser = PydanticToolsParser(tools=[ResearcherOutput], first_tool_onl
 # ============================================================================
 
 def research_sub_question(
-    sub_question: SubQuestion,
-    main_query: str,
-    previous_findings: str = "",
-    existing_citations: int = 0
+        sub_question: SubQuestion,
+        main_query: str,
+        previous_findings: str = "",
+        existing_citations: int = 0
 ) -> Tuple[str, List[Citation], List[str]]:
     """
     Complete research pipeline for a single sub-question.
@@ -230,7 +229,7 @@ def research_sub_question(
         (search_content, new_citations, queries_used)
     """
     from langchain_core.messages import HumanMessage
-    
+
     # Generate search queries
     prompt_vars = {
         "main_query": main_query,
@@ -239,10 +238,10 @@ def research_sub_question(
         "previous_findings": previous_findings or "None yet",
         "messages": [HumanMessage(content=f"Research this: {sub_question.question}")]
     }
-    
+
     try:
         result = researcher_chain.invoke(prompt_vars)
-        
+
         if result.tool_calls:
             parsed = researcher_parser.invoke(result)
             if parsed:
@@ -251,44 +250,45 @@ def research_sub_question(
                 # Fallback queries
                 queries = [sub_question.question, f"{sub_question.question} 2024"]
         else:
-            queries = [sub_question.question, f"{sub_question.question} 2024"]
+            queries = [sub_question.question,
+                       f"{sub_question.question} Date : {datetime.datetime.today().strftime('%Y-%m-%d')}"]
     except Exception as e:
         print(f"[Researcher] Query generation error: {e}")
         queries = [sub_question.question]
-    
+
     # Execute searches
     content, raw_results = execute_search_queries(queries)
-    
+
     # Create citations
     citations = create_citations_from_results(
-        raw_results, 
-        sub_question.id, 
+        raw_results,
+        sub_question.id,
         existing_citations
     )
-    
+
     return content, citations, queries
 
 
 if __name__ == "__main__":
     # Test the researcher
     from langgraph_examples.deep_research_agent.schemas import SubQuestion
-    
+
     test_sq = SubQuestion(
         id="sq_test123",
         question="What are the leading AI-powered SOC platforms and their key features?",
         priority=1,
         status="in_progress"
     )
-    
+
     print("Testing Researcher Agent...")
     print(f"Sub-question: {test_sq.question}\n")
-    
+
     content, citations, queries = research_sub_question(
         test_sq,
         main_query="AI-Powered SOC solutions",
         previous_findings=""
     )
-    
+
     print(f"Queries used: {queries}")
     print(f"\nCitations found: {len(citations)}")
     for c in citations[:3]:

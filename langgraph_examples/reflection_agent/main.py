@@ -222,7 +222,7 @@ builder.set_entry_point("draft")
 
 # Compile with SQLite checkpointer for state persistence
 checkpointer = SqliteSaver.from_conn_string(":memory:")
-graph = builder.compile(checkpointer=checkpointer)
+graph = builder.compile(checkpointer=True)
 
 # Visualize the graph
 print("\n" + "=" * 60)

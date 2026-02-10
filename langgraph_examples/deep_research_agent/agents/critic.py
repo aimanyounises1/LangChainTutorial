@@ -1,7 +1,6 @@
 import datetime
 from typing import List, Optional, Tuple
 
-from langchain_core.output_parsers import PydanticToolsParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_ollama import ChatOllama
 
@@ -112,14 +111,15 @@ CRITIC_PROMPT = ChatPromptTemplate.from_messages([
     ("system", "Evaluate the research draft and determine next action. Use the CriticOutput tool."),
 ]).partial(time=lambda: datetime.datetime.now().isoformat())
 
-def create_critic_llm(model_name: str = "qwen3:30b-a3b"):
-    """Create the LLM configured for the critic agent."""
+def create_critic_llm(model_name: str = "llama3.3:70b"):
+    """Create the LLM configured for the critic agent with structured output."""
     llm = ChatOllama(
         model=model_name,
         temperature=0,  # Deterministic evaluation
         num_ctx=16384,
     )
-    return llm.bind_tools(tools=[CriticOutput], tool_choice="CriticOutput")
+    # Use with_structured_output for robust schema enforcement
+    return llm.with_structured_output(CriticOutput, include_raw=True)
 
 
 def format_sub_questions_status(sub_questions: List[SubQuestion]) -> str:
@@ -239,8 +239,7 @@ def calculate_improvement(
 critic_llm = create_critic_llm()
 critic_chain = CRITIC_PROMPT | critic_llm
 
-# Parser for extracting structured output
-critic_parser = PydanticToolsParser(tools=[CriticOutput], first_tool_only=True)
+# Note: No separate parser needed - with_structured_output handles parsing internally
 
 def critique_draft(
         draft: Optional[ResearchDraft],
@@ -249,11 +248,12 @@ def critique_draft(
         iteration: int,
         max_iterations: int,
         critique_history: List[CritiqueResult],
-        stop_config: StopConditionConfig
+        stop_config: StopConditionConfig,
+        max_retries: int = 2
 ) -> Tuple[CritiqueResult, str]:
     """
-    Perform comprehensive critique of the current draft.
-    
+    Perform comprehensive critique of the current draft with retry logic.
+
     Args:
         draft: Current research draft
         plan: The research plan
@@ -262,7 +262,8 @@ def critique_draft(
         max_iterations: Maximum allowed iterations
         critique_history: History of previous critiques
         stop_config: Configuration for stop conditions
-    
+        max_retries: Maximum number of retry attempts on validation failure
+
     Returns:
         (CritiqueResult, next_action)
     """
@@ -286,15 +287,32 @@ def critique_draft(
         "messages": [HumanMessage(content="Evaluate the current research draft and recommend next action.")]
     }
 
-    try:
-        result = critic_chain.invoke(prompt_vars)
+    last_error = None
+    for attempt in range(max_retries + 1):
+        try:
+            result = critic_chain.invoke(prompt_vars)
 
-        if result.tool_calls:
-            parsed = critic_parser.invoke(result)
-            if parsed:
-                return parsed.critique, parsed.next_action
-    except Exception as e:
-        print(f"[Critic] Error: {e}")
+            # with_structured_output with include_raw=True returns dict with 'parsed' and 'raw'
+            if isinstance(result, dict) and 'parsed' in result:
+                parsed = result['parsed']
+                if parsed and isinstance(parsed, CriticOutput):
+                    return parsed.critique, parsed.next_action
+            # Direct CriticOutput return (without include_raw)
+            elif isinstance(result, CriticOutput):
+                return result.critique, result.next_action
+
+        except Exception as e:
+            last_error = e
+            print(f"[Critic] Attempt {attempt + 1}/{max_retries + 1} Error: {e}")
+
+            # Add error context to prompt for retry
+            if attempt < max_retries:
+                error_feedback = f"\n\nPrevious attempt failed with error: {str(e)[:500]}\nPlease ensure you provide ALL required fields: critique (with is_complete, quality_metrics, reasoning) and next_action."
+                prompt_vars["messages"] = [
+                    HumanMessage(content=f"Evaluate the current research draft and recommend next action.{error_feedback}")
+                ]
+
+    print(f"[Critic] All attempts failed. Last error: {last_error}")
 
     # Fallback evaluation
     return create_fallback_critique(

@@ -10,10 +10,10 @@ The Report Generator agent is responsible for:
 """
 
 import datetime
-from typing import List, Optional
+from typing import List
 
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import PydanticToolsParser
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_ollama import ChatOllama
 
 from langgraph_examples.deep_research_agent.schemas import (
@@ -23,7 +23,6 @@ from langgraph_examples.deep_research_agent.schemas import (
     Citation,
     QualityMetrics,
 )
-
 
 # ============================================================================
 # REPORT GENERATOR PROMPT
@@ -131,7 +130,7 @@ REPORT_GENERATOR_PROMPT = ChatPromptTemplate.from_messages([
 # REPORT GENERATOR LLM CONFIGURATION
 # ============================================================================
 
-def create_report_generator_llm(model_name: str = "qwen3:30b-a3b"):
+def create_report_generator_llm(model_name: str = "llama3.3:70b"):
     """Create the LLM configured for the report generator agent."""
     llm = ChatOllama(
         model=model_name,

@@ -5,11 +5,11 @@ This version runs without pytest for validation purposes.
 """
 
 import sys
+
 from langchain_core.messages import (
     AIMessage,
     HumanMessage,
-    ToolMessage,
-    BaseMessage
+    ToolMessage
 )
 from langgraph.graph import END
 

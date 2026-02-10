@@ -14,7 +14,6 @@ import uuid
 from typing import List, Optional, Dict, Any
 
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.output_parsers import PydanticToolsParser
 from langchain_ollama import ChatOllama
 
 from langgraph_examples.deep_research_agent.schemas import (
@@ -92,14 +91,16 @@ SYNTHESIZER_PROMPT = ChatPromptTemplate.from_messages([
 # SYNTHESIZER LLM CONFIGURATION
 # ============================================================================
 
-def create_synthesizer_llm(model_name: str = "qwen3:30b-a3b"):
-    """Create the LLM configured for the synthesizer agent."""
+def create_synthesizer_llm(model_name: str = "llama3.3:70b"):
+    """Create the LLM configured for the synthesizer agent with structured output."""
     llm = ChatOllama(
         model=model_name,
         temperature=0.2,  # Some creativity for writing
         num_ctx=16384,  # Larger context for draft + results
     )
-    return llm.bind_tools(tools=[SynthesizerOutput], tool_choice="SynthesizerOutput")
+    # Use with_structured_output for robust schema enforcement
+    # This provides better validation than bind_tools + manual parsing
+    return llm.with_structured_output(SynthesizerOutput, include_raw=True)
 
 
 # ============================================================================
@@ -225,8 +226,7 @@ def initialize_draft(main_query: str) -> ResearchDraft:
 synthesizer_llm = create_synthesizer_llm()
 synthesizer_chain = SYNTHESIZER_PROMPT | synthesizer_llm
 
-# Parser for extracting structured output
-synthesizer_parser = PydanticToolsParser(tools=[SynthesizerOutput], first_tool_only=True)
+# Note: No separate parser needed - with_structured_output handles parsing internally
 
 
 # ============================================================================
@@ -239,11 +239,12 @@ def synthesize_findings(
     main_query: str,
     current_draft: Optional[ResearchDraft],
     available_citations: List[Citation],
-    expected_sections: List[str]
+    expected_sections: List[str],
+    max_retries: int = 2
 ) -> tuple[DraftSection, List[Citation], str]:
     """
-    Synthesize search results into the draft.
-    
+    Synthesize search results into the draft with retry logic.
+
     Args:
         sub_question: The sub-question that was researched
         search_results: Formatted search results
@@ -251,16 +252,17 @@ def synthesize_findings(
         current_draft: The current state of the draft
         available_citations: All available citations
         expected_sections: Expected sections from the plan
-    
+        max_retries: Maximum number of retry attempts on validation failure
+
     Returns:
         (updated_section, new_citations, synthesis_notes)
     """
     from langchain_core.messages import HumanMessage
-    
+
     # Determine target section
     existing_sections = current_draft.sections if current_draft else []
     target_section = determine_target_section(sub_question, expected_sections, existing_sections)
-    
+
     # Prepare context
     prompt_vars = {
         "main_query": main_query,
@@ -272,25 +274,42 @@ def synthesize_findings(
         "search_results": search_results,
         "messages": [HumanMessage(content=f"Synthesize the research findings for: {sub_question.question}")]
     }
-    
-    try:
-        result = synthesizer_chain.invoke(prompt_vars)
-        
-        if result.tool_calls:
-            parsed = synthesizer_parser.invoke(result)
-            if parsed:
-                return parsed.updated_section, parsed.new_citations, parsed.synthesis_notes
-    except Exception as e:
-        print(f"[Synthesizer] Error: {e}")
-    
-    # Fallback: create a basic section
+
+    last_error = None
+    for attempt in range(max_retries + 1):
+        try:
+            result = synthesizer_chain.invoke(prompt_vars)
+
+            # with_structured_output with include_raw=True returns dict with 'parsed' and 'raw'
+            if isinstance(result, dict) and 'parsed' in result:
+                parsed = result['parsed']
+                if parsed and isinstance(parsed, SynthesizerOutput):
+                    return parsed.updated_section, parsed.new_citations, parsed.synthesis_notes
+            # Direct SynthesizerOutput return (without include_raw)
+            elif isinstance(result, SynthesizerOutput):
+                return result.updated_section, result.new_citations, result.synthesis_notes
+
+        except Exception as e:
+            last_error = e
+            print(f"[Synthesizer] Attempt {attempt + 1}/{max_retries + 1} Error: {e}")
+
+            # Add error context to prompt for retry
+            if attempt < max_retries:
+                error_feedback = f"\n\nPrevious attempt failed with error: {str(e)[:500]}\nPlease ensure you provide ALL required fields: updated_section (with id, title, content, last_updated), new_citations, synthesis_notes."
+                prompt_vars["messages"] = [
+                    HumanMessage(content=f"Synthesize the research findings for: {sub_question.question}{error_feedback}")
+                ]
+
+    print(f"[Synthesizer] All attempts failed. Last error: {last_error}")
+
+    # Fallback: create a basic section with proper structure
     fallback_section = create_section(
         title=target_section,
         content=f"## Findings for: {sub_question.question}\n\n{search_results[:2000]}",
         citations_used=[c.id for c in available_citations[-5:]]  # Use recent citations
     )
-    
-    return fallback_section, [], "Fallback synthesis due to error"
+
+    return fallback_section, [], "Fallback synthesis due to validation errors"
 
 
 def update_draft_with_section(
