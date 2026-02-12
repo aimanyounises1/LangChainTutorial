@@ -50,7 +50,7 @@ async def ingest_docs(query: str):
 
 
 async def main():
-    query = "What is the Pinecone Database? For what purposes it is being used?"
+    query = "What is DeepAgents how to use those in LangChain?"
 
     # 1. Ingest docs from Tavily search into Pinecone
     await ingest_docs(query)
